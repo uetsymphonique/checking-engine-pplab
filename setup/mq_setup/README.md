@@ -31,17 +31,53 @@ Caldera → RabbitMQ Exchange → Checking Engine → Detection Workers → Resu
 
 ## Quick Setup
 
-### Option 1: Automated Setup (Recommended)
+### Option 1: Phase-by-Phase Setup (Recommended)
+
+Execute each phase in sequence for better control and debugging:
 
 ```bash
 cd setup/mq_setup/
-chmod +x setup_rabbitmq.sh
-sudo ./setup_rabbitmq.sh
+
+# Phase 1: Install RabbitMQ
+sudo ./01_install_rabbitmq.sh
+
+# Phase 2: Setup virtual host and users
+sudo ./02_setup_vhost_users.sh
+
+# Phase 3: Setup exchanges and queues
+sudo ./03_setup_exchanges_queues.sh
+
+# Phase 4: Configure limits and security
+sudo ./04_configure_limits_security.sh
+
+# Phase 5: Final verification
+sudo ./05_final_verification.sh
+
+# Phase 6: Interactive Purple Team test (optional)
+sudo ./06_interactive_purple_team_test.sh
 ```
 
 ### Option 2: Manual Setup
 
-Follow the step-by-step instructions in this README.
+Follow the step-by-step instructions below for manual installation.
+
+## Setup Files Overview
+
+| File | Description | Purpose |
+|------|-------------|---------|
+| `01_install_rabbitmq.sh` | Install RabbitMQ server and management plugin | Phase 1: Basic installation |
+| `02_setup_vhost_users.sh` | Create virtual host and users with permissions | Phase 2: Security setup |
+| `03_setup_exchanges_queues.sh` | Create exchanges, queues, and bindings | Phase 3: Message routing |
+| `04_configure_limits_security.sh` | Set resource limits and security policies | Phase 4: Production config |
+| `05_final_verification.sh` | Comprehensive testing of the setup | Phase 5: Verification |
+| `06_interactive_purple_team_test.sh` | Interactive Purple Team workflow test | Phase 6: End-to-end testing |
+| `cleanup_rabbitmq.sh` | Remove RabbitMQ setup completely | Cleanup utility |
+| `flush_all_queues.sh` | Clear all messages from queues | Testing utility |
+
+Generated files after setup:
+- `rabbitmq_passwords.txt` - Secure passwords for all users
+- `rabbitmq_setup_report.txt` - Complete setup status report
+- `rabbitmq_phase*.log` - Detailed logs from each phase
 
 ## Manual Installation Steps
 
@@ -583,13 +619,21 @@ sudo rabbitmqctl status | grep memory
 sudo nano /etc/rabbitmq/rabbitmq.conf
 ```
 
+## Additional Tools
+
+### Flush All Queue Messages
+
+To remove all messages from queues for testing:
+
+```bash
+sudo ./flush_all_queues.sh
+```
+
 ## Cleanup
 
 To completely remove RabbitMQ setup:
 
 ```bash
-cd setup/mq_setup/
-chmod +x cleanup_rabbitmq.sh
 sudo ./cleanup_rabbitmq.sh
 ```
 
