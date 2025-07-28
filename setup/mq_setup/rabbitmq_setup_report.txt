@@ -1,0 +1,89 @@
+# RabbitMQ Checking Engine Setup Report
+Generated: Mon Jul 28 12:14:53 CEST 2025
+
+## System Status
+RabbitMQ Service: active
+Management Plugin: rabbitmq_management
+rabbitmq_management_agent
+
+## Virtual Host
+/caldera_checking
+
+## Users and Permissions
+Listing users ...
+user	tags
+caldera_admin	[administrator]
+checking_worker	[management]
+checking_consumer	[management]
+monitor_user	[monitoring]
+caldera_publisher	[management]
+
+## User Permissions in Virtual Host
+Listing permissions for vhost "/caldera_checking" ...
+user	configure	write	read
+checking_consumer	^$	^$	^caldera\.checking\.instructions$
+monitor_user	^$	^$	^caldera\.checking\..*$
+caldera_admin	.*	.*	.*
+caldera_publisher	^$	^caldera\.checking\.exchange$	^$
+checking_worker	^$	^caldera\.checking\.(exchange|(api|agent)\.responses)$	^$
+
+## Exchanges
+Listing exchanges for vhost /caldera_checking ...
+name	type
+amq.match	headers
+caldera.checking.exchange	topic
+amq.fanout	fanout
+amq.topic	topic
+amq.headers	headers
+	direct
+amq.rabbitmq.trace	topic
+amq.direct	direct
+
+## Queues
+Timeout: 60.0 seconds ...
+Listing queues for vhost /caldera_checking ...
+name	messages
+caldera.checking.agent.responses	2
+caldera.checking.api.responses	2
+caldera.checking.instructions	0
+
+## Bindings
+Listing bindings for vhost /caldera_checking...
+source_name	source_kind	destination_name	destination_kind	routing_key	arguments
+	exchange	caldera.checking.agent.responses	queue	caldera.checking.agent.responses	[]
+	exchange	caldera.checking.api.responses	queue	caldera.checking.api.responses	[]
+	exchange	caldera.checking.instructions	queue	caldera.checking.instructions	[]
+caldera.checking.exchange	exchange	caldera.checking.instructions	queue	caldera.execution.result	[]
+caldera.checking.exchange	exchange	caldera.checking.agent.responses	queue	checking.agent.response	[]
+caldera.checking.exchange	exchange	caldera.checking.api.responses	queue	checking.api.response	[]
+
+## Policies
++-------------------+-------------------------+----------+-----------------------------------------------------------------+------------------------+----------+
+|       vhost       |          name           | apply-to |                           definition                            |        pattern         | priority |
++-------------------+-------------------------+----------+-----------------------------------------------------------------+------------------------+----------+
+| /caldera_checking | caldera-checking-limits | all      | {"ha-mode": "all", "max-length": 10000, "message-ttl": 3600000} | ^caldera\.checking\..* | 0        |
++-------------------+-------------------------+----------+-----------------------------------------------------------------+------------------------+----------+
+
+## User Limits
+Publisher limits: Listing limits for user "caldera_publisher" ...
+{"max-connections":100}
+Consumer limits: Listing limits for user "checking_consumer" ...
+{"max-connections":100}
+Worker limits: Listing limits for user "checking_worker" ...
+{"max-connections":100}
+
+## Connection Strings (use with actual passwords from rabbitmq_passwords.txt)
+Admin: amqp://caldera_admin:<password>@localhost:5672/caldera_checking
+Publisher: amqp://caldera_publisher:<password>@localhost:5672/caldera_checking
+Consumer: amqp://checking_consumer:<password>@localhost:5672/caldera_checking
+Worker: amqp://checking_worker:<password>@localhost:5672/caldera_checking
+Monitor: amqp://monitor_user:<password>@localhost:5672/caldera_checking
+
+## Management UI
+Access: http://localhost:15672
+Login with any user credentials above
+
+## Configuration Files
+- /etc/rabbitmq/rabbitmq.conf
+- .env.example (template)
+- rabbitmq_passwords.txt (passwords)
