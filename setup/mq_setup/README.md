@@ -6,22 +6,47 @@ This directory contains RabbitMQ setup scripts and documentation for the Checkin
 
 The Checking Engine uses RabbitMQ as a message broker to facilitate communication between:
 - **Caldera (Red Team)**: Publishes execution results
-- **Checking Engine Backend**: Consumes instructions and processes detection tasks  
+- **Checking Engine Backend**: Consumes instructions, dispatches detection tasks, and processes results
 - **Detection Workers**: Execute detection queries and publish results
 
 ## Architecture
 
 ```
-Caldera → RabbitMQ Exchange → Checking Engine → Detection Workers → Results
+Caldera → RabbitMQ Exchange → Checking Engine Backend → Task Queues → Detection Workers → Result Queues → Result Consumer
 ```
 
 ### Message Flow
 
 1. **Caldera Publisher** → `caldera.checking.exchange` → `caldera.checking.instructions` queue
-2. **Checking Engine** consumes from `caldera.checking.instructions`
-3. **Detection Workers** publish to:
-   - `caldera.checking.api.responses` (for API-based detections)
-   - `caldera.checking.agent.responses` (for agent-based detections)
+2. **Checking Engine Backend Consumer** consumes from `caldera.checking.instructions`
+3. **Checking Engine Dispatcher** publishes tasks to:
+   - `caldera.checking.api.tasks` (for API-based detections)
+   - `caldera.checking.agent.tasks` (for agent-based detections)
+4. **Detection Workers** consume tasks and publish results to:
+   - `caldera.checking.api.responses` (API detection results)
+   - `caldera.checking.agent.responses` (agent detection results)
+5. **Result Consumer** processes detection results from response queues
+
+## Infrastructure Components
+
+### Users (7 total with RBAC)
+- **caldera_admin**: Full administrative access
+- **caldera_publisher**: Publishes Red Team execution results
+- **checking_consumer**: Consumes instruction messages
+- **checking_dispatcher**: Publishes detection tasks to workers
+- **checking_worker**: Consumes tasks and publishes detection results
+- **checking_result_consumer**: Consumes detection results for processing
+- **monitor_user**: Read-only monitoring access
+
+### Queues (5 total)
+- **caldera.checking.instructions**: Red Team execution results
+- **caldera.checking.api.tasks**: API detection tasks
+- **caldera.checking.agent.tasks**: Agent detection tasks
+- **caldera.checking.api.responses**: API detection results
+- **caldera.checking.agent.responses**: Agent detection results
+
+### Exchange
+- **caldera.checking.exchange**: Topic exchange for all message routing
 
 ## Prerequisites
 
@@ -41,10 +66,10 @@ cd setup/mq_setup/
 # Phase 1: Install RabbitMQ
 sudo ./01_install_rabbitmq.sh
 
-# Phase 2: Setup virtual host and users
+# Phase 2: Setup virtual host and users (7 users with RBAC)
 sudo ./02_setup_vhost_users.sh
 
-# Phase 3: Setup exchanges and queues
+# Phase 3: Setup exchanges and queues (5 queues)
 sudo ./03_setup_exchanges_queues.sh
 
 # Phase 4: Configure limits and security
@@ -66,16 +91,16 @@ Follow the step-by-step instructions below for manual installation.
 | File | Description | Purpose |
 |------|-------------|---------|
 | `01_install_rabbitmq.sh` | Install RabbitMQ server and management plugin | Phase 1: Basic installation |
-| `02_setup_vhost_users.sh` | Create virtual host and users with permissions | Phase 2: Security setup |
-| `03_setup_exchanges_queues.sh` | Create exchanges, queues, and bindings | Phase 3: Message routing |
+| `02_setup_vhost_users.sh` | Create virtual host and 7 users with RBAC permissions | Phase 2: Security setup |
+| `03_setup_exchanges_queues.sh` | Create exchanges, 5 queues, and bindings | Phase 3: Message routing |
 | `04_configure_limits_security.sh` | Set resource limits and security policies | Phase 4: Production config |
 | `05_final_verification.sh` | Comprehensive testing of the setup | Phase 5: Verification |
 | `06_interactive_purple_team_test.sh` | Interactive Purple Team workflow test | Phase 6: End-to-end testing |
 | `cleanup_rabbitmq.sh` | Remove RabbitMQ setup completely | Cleanup utility |
-| `flush_all_queues.sh` | Clear all messages from queues | Testing utility |
+| `flush_all_queues.sh` | Clear all messages from 5 queues | Testing utility |
 
 Generated files after setup:
-- `rabbitmq_passwords.txt` - Secure passwords for all users
+- `rabbitmq_passwords.txt` - Secure passwords for all 7 users
 - `rabbitmq_setup_report.txt` - Complete setup status report
 - `rabbitmq_phase*.log` - Detailed logs from each phase
 
@@ -150,7 +175,7 @@ sudo rabbitmqctl list_vhosts
 # Should show /caldera_checking in the list
 ```
 
-### Step 4: Create Users with Role-Based Access
+### Step 4: Create Users with Role-Based Access (7 Users)
 
 ```bash
 # 1. Admin user (for initial setup and management)
@@ -174,15 +199,31 @@ sudo rabbitmqctl set_permissions -p /caldera_checking checking_consumer \
   "^$" \
   "^caldera\.checking\.instructions$"
 
-# 4. Detection workers (publish results)
+# 4. Detection workers (consume tasks, publish results)
 sudo rabbitmqctl add_user checking_worker $(openssl rand -base64 24)
 sudo rabbitmqctl set_user_tags checking_worker management
 sudo rabbitmqctl set_permissions -p /caldera_checking checking_worker \
   "^$" \
-  "^caldera\.checking\.(exchange|(api|agent)\.responses)$" \
+  "^caldera\.checking\.(exchange\|(api\|agent)\.responses)$" \
+  "^caldera\.checking\.(api\.tasks|agent\.tasks)$"
+
+# 5. Dispatcher publisher (publishes detection tasks)
+sudo rabbitmqctl add_user checking_dispatcher $(openssl rand -base64 24)
+sudo rabbitmqctl set_user_tags checking_dispatcher management
+sudo rabbitmqctl set_permissions -p /caldera_checking checking_dispatcher \
+  "^$" \
+  "^caldera\.checking\.exchange$" \
   "^$"
 
-# 5. Monitor user (read-only access for monitoring)
+# 6. Result consumer (consumes detection results)
+sudo rabbitmqctl add_user checking_result_consumer $(openssl rand -base64 24)
+sudo rabbitmqctl set_user_tags checking_result_consumer management
+sudo rabbitmqctl set_permissions -p /caldera_checking checking_result_consumer \
+  "^$" \
+  "^$" \
+  "^caldera\.checking\.(api|agent)\.responses$"
+
+# 7. Monitor user (read-only access for monitoring)
 sudo rabbitmqctl add_user monitor_user $(openssl rand -base64 24)
 sudo rabbitmqctl set_user_tags monitor_user monitoring
 sudo rabbitmqctl set_permissions -p /caldera_checking monitor_user \
@@ -196,17 +237,17 @@ sudo rabbitmqctl set_permissions -p /caldera_checking monitor_user \
 # List all users
 sudo rabbitmqctl list_users
 
-# Should show all 5 users with their roles
+# Should show all 7 users with their roles
 # Check user permissions for virtual host
 sudo rabbitmqctl list_permissions -p /caldera_checking
 
-# Should show permissions for all users
+# Should show permissions for all 7 users
 # Save passwords for later use (IMPORTANT!)
 echo "Save these passwords securely:"
 sudo rabbitmqctl list_users
 ```
 
-### Step 5: Create Exchange and Queues
+### Step 5: Create Exchange and Queues (5 Queues)
 
 ```bash
 # Get admin password (replace with actual password from step 4)
@@ -221,16 +262,32 @@ rabbitmqadmin -u caldera_admin -p "$ADMIN_PASS" -V /caldera_checking declare que
   name=caldera.checking.instructions durable=true
 
 rabbitmqadmin -u caldera_admin -p "$ADMIN_PASS" -V /caldera_checking declare queue \
+  name=caldera.checking.api.tasks durable=true
+
+rabbitmqadmin -u caldera_admin -p "$ADMIN_PASS" -V /caldera_checking declare queue \
+  name=caldera.checking.agent.tasks durable=true
+
+rabbitmqadmin -u caldera_admin -p "$ADMIN_PASS" -V /caldera_checking declare queue \
   name=caldera.checking.api.responses durable=true
 
 rabbitmqadmin -u caldera_admin -p "$ADMIN_PASS" -V /caldera_checking declare queue \
   name=caldera.checking.agent.responses durable=true
 
-# Bind queues to exchange
+# Bind queues to exchange with routing keys
 rabbitmqadmin -u caldera_admin -p "$ADMIN_PASS" -V /caldera_checking declare binding \
   source=caldera.checking.exchange \
   destination=caldera.checking.instructions \
   routing_key=caldera.execution.result
+
+rabbitmqadmin -u caldera_admin -p "$ADMIN_PASS" -V /caldera_checking declare binding \
+  source=caldera.checking.exchange \
+  destination=caldera.checking.api.tasks \
+  routing_key=checking.api.task
+
+rabbitmqadmin -u caldera_admin -p "$ADMIN_PASS" -V /caldera_checking declare binding \
+  source=caldera.checking.exchange \
+  destination=caldera.checking.agent.tasks \
+  routing_key=checking.agent.task
 
 rabbitmqadmin -u caldera_admin -p "$ADMIN_PASS" -V /caldera_checking declare binding \
   source=caldera.checking.exchange \
@@ -252,11 +309,11 @@ sudo rabbitmqctl list_exchanges -p /caldera_checking
 # List queues in the virtual host
 sudo rabbitmqctl list_queues -p /caldera_checking
 
-# Should show all 3 queues with 0 messages initially
+# Should show all 5 queues with 0 messages initially
 # List bindings to verify routing
 sudo rabbitmqctl list_bindings -p /caldera_checking
 
-# Should show 3 bindings from exchange to queues
+# Should show 5 bindings from exchange to queues
 # Test message publishing and routing
 rabbitmqadmin -u caldera_admin -p "$ADMIN_PASS" -V /caldera_checking publish \
   exchange=caldera.checking.exchange \
@@ -272,10 +329,12 @@ sudo rabbitmqctl list_queues -p /caldera_checking name messages
 ### Step 6: Configure Resource Limits
 
 ```bash
-# Set connection limits per user
+# Set connection limits per user (all 7 users)
 sudo rabbitmqctl set_user_limits -p /caldera_checking caldera_publisher '{"max-connections": 100}'
 sudo rabbitmqctl set_user_limits -p /caldera_checking checking_consumer '{"max-connections": 100}'
 sudo rabbitmqctl set_user_limits -p /caldera_checking checking_worker '{"max-connections": 100}'
+sudo rabbitmqctl set_user_limits -p /caldera_checking checking_dispatcher '{"max-connections": 100}'
+sudo rabbitmqctl set_user_limits -p /caldera_checking checking_result_consumer '{"max-connections": 100}'
 
 # Set queue policies
 rabbitmqadmin -u caldera_admin -p "$ADMIN_PASS" -V /caldera_checking declare policy \
@@ -290,6 +349,8 @@ rabbitmqadmin -u caldera_admin -p "$ADMIN_PASS" -V /caldera_checking declare pol
 sudo rabbitmqctl list_user_limits --user caldera_publisher
 sudo rabbitmqctl list_user_limits --user checking_consumer  
 sudo rabbitmqctl list_user_limits --user checking_worker
+sudo rabbitmqctl list_user_limits --user checking_dispatcher
+sudo rabbitmqctl list_user_limits --user checking_result_consumer
 
 # Should show connection limits for each user
 # Check queue policies
@@ -343,13 +404,15 @@ CALDERA_ADMIN_PASSWORD=<password_from_step_4>
 CALDERA_PUBLISHER_PASSWORD=<password_from_step_4>
 CHECKING_CONSUMER_PASSWORD=<password_from_step_4>
 CHECKING_WORKER_PASSWORD=<password_from_step_4>
+CHECKING_DISPATCHER_PASSWORD=<password_from_step_4>
+CHECKING_RESULT_CONSUMER_PASSWORD=<password_from_step_4>
 MONITOR_USER_PASSWORD=<password_from_step_4>
 EOF
 
 chmod 600 rabbitmq_passwords_manual.txt
 ```
 
-**✅ Final Verification: End-to-End Purple Team Workflow**
+**✅ Final Verification: Complete Purple Team Workflow**
 ```bash
 # === SYSTEM HEALTH CHECK ===
 echo "=== System Health and Readiness ==="
@@ -390,8 +453,25 @@ EXECUTION_MSG=$(rabbitmqadmin -u checking_consumer -p "your_consumer_password" -
 echo "$EXECUTION_MSG" | head -3
 echo "→ Message consumed: Backend creates detection tasks for SIEM and Windows agent"
 
-# 3. API WORKER: Execute SIEM detection
-echo "🔍 API WORKER: Executing SIEM detection query"
+# 3. DISPATCHER: Publish detection tasks
+echo "📋 DISPATCHER: Publishing detection tasks to workers"
+rabbitmqadmin -u checking_dispatcher -p "your_dispatcher_password" -V /caldera_checking publish \
+  exchange=caldera.checking.exchange \
+  routing_key=checking.api.task \
+  payload='{"task_id": "task-001", "detection_type": "api", "platform": "splunk"}'
+
+rabbitmqadmin -u checking_dispatcher -p "your_dispatcher_password" -V /caldera_checking publish \
+  exchange=caldera.checking.exchange \
+  routing_key=checking.agent.task \
+  payload='{"task_id": "task-002", "detection_type": "agent", "platform": "windows"}'
+echo "→ Tasks dispatched: API and Agent detection tasks queued"
+
+# 4. API WORKER: Consume task and execute SIEM detection
+echo "🔍 API WORKER: Consuming task and executing SIEM detection"
+TASK_MSG=$(rabbitmqadmin -u checking_worker -p "your_worker_password" -V /caldera_checking get \
+  queue=caldera.checking.api.tasks ackmode=ack_requeue_false)
+echo "→ Task consumed, executing SIEM query..."
+
 rabbitmqadmin -u checking_worker -p "your_worker_password" -V /caldera_checking publish \
   exchange=caldera.checking.exchange \
   routing_key=checking.api.response \
@@ -406,8 +486,12 @@ rabbitmqadmin -u checking_worker -p "your_worker_password" -V /caldera_checking 
   }'
 echo "→ SIEM Detection: DETECTED suspicious admin activity (5 events found)"
 
-# 4. AGENT WORKER: Execute Windows agent detection
-echo "🔍 AGENT WORKER: Executing Windows agent detection"
+# 5. AGENT WORKER: Consume task and execute Windows agent detection
+echo "🔍 AGENT WORKER: Consuming task and executing Windows agent detection"
+TASK_MSG=$(rabbitmqadmin -u checking_worker -p "your_worker_password" -V /caldera_checking get \
+  queue=caldera.checking.agent.tasks ackmode=ack_requeue_false)
+echo "→ Task consumed, executing Windows PowerShell detection..."
+
 rabbitmqadmin -u checking_worker -p "your_worker_password" -V /caldera_checking publish \
   exchange=caldera.checking.exchange \
   routing_key=checking.agent.response \
@@ -422,7 +506,15 @@ rabbitmqadmin -u checking_worker -p "your_worker_password" -V /caldera_checking 
   }'
 echo "→ Agent Detection: NOT DETECTED (possible evasion technique used)"
 
-# 5. MONITORING: View complete exercise results
+# 6. RESULT CONSUMER: Process detection results
+echo "📊 RESULT CONSUMER: Processing detection results"
+API_RESULT=$(rabbitmqadmin -u checking_result_consumer -p "your_result_consumer_password" -V /caldera_checking get \
+  queue=caldera.checking.api.responses ackmode=ack_requeue_false)
+AGENT_RESULT=$(rabbitmqadmin -u checking_result_consumer -p "your_result_consumer_password" -V /caldera_checking get \
+  queue=caldera.checking.agent.responses ackmode=ack_requeue_false)
+echo "→ Results processed: API detection positive, Agent detection negative"
+
+# 7. MONITORING: View complete exercise results
 echo "📊 MONITORING: Purple Team Exercise Summary"
 rabbitmqadmin -u monitor_user -p "your_monitor_password" -V /caldera_checking list queues name messages
 
@@ -497,17 +589,27 @@ RABBITMQ_CONSUMER_PASS=<generated_password>
 RABBITMQ_WORKER_USER=checking_worker
 RABBITMQ_WORKER_PASS=<generated_password>
 
+RABBITMQ_DISPATCHER_USER=checking_dispatcher
+RABBITMQ_DISPATCHER_PASS=<generated_password>
+
+RABBITMQ_RESULT_CONSUMER_USER=checking_result_consumer
+RABBITMQ_RESULT_CONSUMER_PASS=<generated_password>
+
 RABBITMQ_MONITOR_USER=monitor_user
 RABBITMQ_MONITOR_PASS=<generated_password>
 
 # Exchange and Queue Names
 RABBITMQ_EXCHANGE=caldera.checking.exchange
 RABBITMQ_INSTRUCTIONS_QUEUE=caldera.checking.instructions
+RABBITMQ_API_TASKS_QUEUE=caldera.checking.api.tasks
+RABBITMQ_AGENT_TASKS_QUEUE=caldera.checking.agent.tasks
 RABBITMQ_API_RESPONSES_QUEUE=caldera.checking.api.responses
 RABBITMQ_AGENT_RESPONSES_QUEUE=caldera.checking.agent.responses
 
 # Routing Keys
 ROUTING_KEY_EXECUTION_RESULT=caldera.execution.result
+ROUTING_KEY_API_TASK=checking.api.task
+ROUTING_KEY_AGENT_TASK=checking.agent.task
 ROUTING_KEY_API_RESPONSE=checking.api.response
 ROUTING_KEY_AGENT_RESPONSE=checking.agent.response
 ```
@@ -521,7 +623,9 @@ ROUTING_KEY_AGENT_RESPONSE=checking.agent.response
 | `caldera_admin` | Administrator | `administrator` | `.*` | `.*` | `.*` | Resource management |
 | `caldera_publisher` | Publisher | `management` | `^$` | `^caldera\.checking\.exchange$` | `^$` | Publish execution results |
 | `checking_consumer` | Consumer | `management` | `^$` | `^$` | `^caldera\.checking\.instructions$` | Consume instructions |
-| `checking_worker` | Worker | `management` | `^$` | `^caldera\.checking\.(exchange\|(api\|agent)\.responses)$` | `^$` | Publish detection results |
+| `checking_dispatcher` | Dispatcher | `management` | `^$` | `^caldera\.checking\.exchange$` | `^$` | Publish detection tasks |
+| `checking_worker` | Worker | `management` | `^$` | `^caldera\.checking\.(exchange\|(api\|agent)\.responses)$` | `^caldera\.checking\.(api\.tasks\|agent\.tasks)$` | Execute detections |
+| `checking_result_consumer` | Result Consumer | `management` | `^$` | `^$` | `^caldera\.checking\.(api\|agent)\.responses$` | Process detection results |
 | `monitor_user` | Monitor | `monitoring` | `^$` | `^$` | `^caldera\.checking\..*$` | Read-only monitoring |
 
 ### Security Best Practices
@@ -532,6 +636,7 @@ ROUTING_KEY_AGENT_RESPONSE=checking.agent.response
 4. **Firewall Rules**: Only open necessary ports
 5. **Regular Updates**: Keep RabbitMQ server updated
 6. **Monitor Access**: Use monitor_user for logging and alerting
+7. **Least Privilege**: Each user has minimal required permissions
 
 ## Verification
 
@@ -541,13 +646,13 @@ ROUTING_KEY_AGENT_RESPONSE=checking.agent.response
 # Check RabbitMQ status
 sudo systemctl status rabbitmq-server
 
-# Check users
+# Check users (should show 7 users)
 sudo rabbitmqctl list_users
 
 # Check virtual hosts
 sudo rabbitmqctl list_vhosts
 
-# Check queues
+# Check queues (should show 5 queues)
 sudo rabbitmqctl list_queues -p /caldera_checking
 
 # Check exchanges
@@ -565,7 +670,7 @@ rabbitmqadmin -u caldera_admin -p "$ADMIN_PASS" -V /caldera_checking publish \
 
 # Verify message was queued
 rabbitmqadmin -u caldera_admin -p "$ADMIN_PASS" -V /caldera_checking get \
-  queue=caldera.checking.instructions
+  queue=caldera.checking.instructions ackmode=ack_requeue_false
 ```
 
 ### Web Management Interface
@@ -575,8 +680,8 @@ rabbitmqadmin -u caldera_admin -p "$ADMIN_PASS" -V /caldera_checking get \
 3. Navigate to:
    - **Virtual Hosts** → `/caldera_checking`
    - **Exchanges** → `caldera.checking.exchange`
-   - **Queues** → Verify all queues exist
-   - **Admin** → **Users** → Verify all users with correct permissions
+   - **Queues** → Verify all 5 queues exist
+   - **Admin** → **Users** → Verify all 7 users with correct permissions
 
 ## Troubleshooting
 
@@ -623,7 +728,7 @@ sudo nano /etc/rabbitmq/rabbitmq.conf
 
 ### Flush All Queue Messages
 
-To remove all messages from queues for testing:
+To remove all messages from all 5 queues for testing:
 
 ```bash
 sudo ./flush_all_queues.sh
@@ -646,11 +751,13 @@ sudo systemctl stop rabbitmq-server
 # Remove virtual host (removes all queues, exchanges, bindings)
 sudo rabbitmqctl delete_vhost /caldera_checking
 
-# Remove users
+# Remove all 7 users
 sudo rabbitmqctl delete_user caldera_admin
 sudo rabbitmqctl delete_user caldera_publisher  
 sudo rabbitmqctl delete_user checking_consumer
+sudo rabbitmqctl delete_user checking_dispatcher
 sudo rabbitmqctl delete_user checking_worker
+sudo rabbitmqctl delete_user checking_result_consumer
 sudo rabbitmqctl delete_user monitor_user
 
 # Optionally remove RabbitMQ completely
@@ -675,4 +782,4 @@ For more information, see:
 
 ---
 
-**Note**: This setup creates a production-ready RabbitMQ configuration with proper security and resource limits. Always test in a development environment first. 
+**Note**: This setup creates a production-ready RabbitMQ configuration with proper security, RBAC for 7 users, 5-queue topology, and resource limits. Always test in a development environment first. 

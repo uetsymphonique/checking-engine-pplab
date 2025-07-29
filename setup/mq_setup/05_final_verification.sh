@@ -63,8 +63,10 @@ load_passwords() {
     CONSUMER_PASS=$CHECKING_CONSUMER_PASSWORD
     WORKER_PASS=$CHECKING_WORKER_PASSWORD
     MONITOR_PASS=$MONITOR_USER_PASSWORD
+    DISPATCHER_PASS=$CHECKING_DISPATCHER_PASSWORD
+    RESULT_PASS=$CHECKING_RESULT_CONSUMER_PASSWORD
     
-    if [ -z "$ADMIN_PASS" ] || [ -z "$PUBLISHER_PASS" ] || [ -z "$CONSUMER_PASS" ] || [ -z "$WORKER_PASS" ] || [ -z "$MONITOR_PASS" ]; then
+    if [ -z "$ADMIN_PASS" ] || [ -z "$PUBLISHER_PASS" ] || [ -z "$CONSUMER_PASS" ] || [ -z "$WORKER_PASS" ] || [ -z "$MONITOR_PASS" ] || [ -z "$DISPATCHER_PASS" ] || [ -z "$RESULT_PASS" ]; then
         print_error "One or more passwords not found in passwords file"
         exit 1
     fi
@@ -90,15 +92,16 @@ check_prerequisites() {
     
     # Check users
     local user_count=$(rabbitmqctl list_users | grep -c "caldera\|checking\|monitor" || true)
-    if [ $user_count -ne 5 ]; then
-        print_error "Not all users exist (expected 5, found $user_count)"
+    if [ $user_count -ne 7 ]; then
+        print_error "Not all users exist (expected 7, found $user_count)"
         exit 1
     fi
     
     # Check queues
     local queue_count=$(rabbitmqctl list_queues -p $VHOST | grep -c "caldera.checking" || true)
-    if [ $queue_count -ne 3 ]; then
-        print_error "Not all queues exist (expected 3, found $queue_count)"
+    # there are an additional keyword "caldera.checking" in message log, so we need to add 1
+    if [ $queue_count -ne 6 ]; then
+        print_error "Not all queues exist (expected 5, found $queue_count)"
         exit 1
     fi
     
@@ -141,12 +144,36 @@ test_user_permissions() {
         return 1
     fi
     
-    # Test worker can publish to response queues
+    # Test dispatcher can publish tasks
+    print_status "Testing dispatcher permissions..."
+    if rabbitmqadmin -u checking_dispatcher -p $DISPATCHER_PASS -V $VHOST publish \
+        exchange=caldera.checking.exchange \
+        routing_key=checking.api.task \
+        payload='{"test": "dispatcher_task"}' >> $LOG_FILE 2>&1; then
+        print_success "[+] Dispatcher can publish tasks"
+    else
+        print_error "[-] Dispatcher cannot publish tasks"
+        return 1
+    fi
+
+    # Test worker can read from API tasks queue and consume the task
+    print_status "Testing worker read permission on API tasks queue..."
+    sleep 1  # Allow task to be routed
+    local worker_task_read=$(rabbitmqadmin -u checking_worker -p $WORKER_PASS -V $VHOST get \
+        queue=caldera.checking.api.tasks ackmode=ack_requeue_false 2>/dev/null || echo "FAILED")
+    if [[ "$worker_task_read" != "FAILED" ]]; then
+        print_success "[+] Worker can read from API tasks queue"
+    else
+        print_error "[-] Worker cannot read from API tasks queue"
+        return 1
+    fi
+    
+    # Test worker can publish to response queues (after consuming task)
     print_status "Testing worker permissions..."
     if rabbitmqadmin -u checking_worker -p $WORKER_PASS -V $VHOST publish \
         exchange=caldera.checking.exchange \
         routing_key=checking.api.response \
-        payload='{"test": "worker_api_test"}' >> $LOG_FILE 2>&1; then
+        payload='{"test": "worker_api_response"}' >> $LOG_FILE 2>&1; then
         print_success "[+] Worker can publish API responses"
     else
         print_error "[-] Worker cannot publish API responses"
@@ -156,13 +183,25 @@ test_user_permissions() {
     if rabbitmqadmin -u checking_worker -p $WORKER_PASS -V $VHOST publish \
         exchange=caldera.checking.exchange \
         routing_key=checking.agent.response \
-        payload='{"test": "worker_agent_test"}' >> $LOG_FILE 2>&1; then
+        payload='{"test": "worker_agent_response"}' >> $LOG_FILE 2>&1; then
         print_success "[+] Worker can publish agent responses"
     else
         print_error "[-] Worker cannot publish agent responses"
         return 1
     fi
-    
+
+    # Test result consumer can read responses queues
+    print_status "Testing result consumer permissions..."
+    sleep 1
+    local res_read=$(rabbitmqadmin -u checking_result_consumer -p $RESULT_PASS -V $VHOST get \
+        queue=caldera.checking.api.responses ackmode=ack_requeue_false 2>/dev/null || echo "FAILED")
+    if [[ "$res_read" != "FAILED" ]]; then
+        print_success "[+] Result consumer can read API responses queue"
+    else
+        print_error "[-] Result consumer cannot read API responses queue"
+        return 1
+    fi
+
     # Test monitor can read from all queues
     print_status "Testing monitor permissions..."
     local monitor_test=$(rabbitmqadmin -u monitor_user -p $MONITOR_PASS -V $VHOST list queues 2>/dev/null || echo "FAILED")
@@ -342,19 +381,19 @@ final_verification() {
     
     # Check all users exist
     local user_count=$(rabbitmqctl list_users | grep -c "caldera\|checking\|monitor" || true)
-    if [ $user_count -eq 5 ]; then
-        print_success "[+] All 5 users exist"
+    if [ $user_count -eq 7 ]; then
+        print_success "[+] All 7 users exist"
     else
-        print_error "[-] Missing users (found $user_count, expected 5)"
+        print_error "[-] Missing users (found $user_count, expected 7)"
         all_tests_passed=false
     fi
     
     # Check all queues exist
     local queue_count=$(rabbitmqctl list_queues -p $VHOST | grep -c "caldera.checking" || true)
-    if [ $queue_count -eq 3 ]; then
-        print_success "[+] All 3 queues exist"
+    if [ $queue_count -eq 6 ]; then
+        print_success "[+] All 5 queues exist"
     else
-        print_error "[-] Missing queues (found $queue_count, expected 3)"
+        print_error "[-] Missing queues (found $queue_count, expected 5)"
         all_tests_passed=false
     fi
     

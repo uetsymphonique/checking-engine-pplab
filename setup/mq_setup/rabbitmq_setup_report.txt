@@ -1,5 +1,5 @@
 # RabbitMQ Checking Engine Setup Report
-Generated: Mon Jul 28 12:14:53 CEST 2025
+Generated: Tue Jul 29 06:55:21 CEST 2025
 
 ## System Status
 RabbitMQ Service: active
@@ -14,18 +14,22 @@ Listing users ...
 user	tags
 caldera_admin	[administrator]
 checking_worker	[management]
+checking_result_consumer	[management]
 checking_consumer	[management]
 monitor_user	[monitoring]
+checking_dispatcher	[management]
 caldera_publisher	[management]
 
 ## User Permissions in Virtual Host
 Listing permissions for vhost "/caldera_checking" ...
 user	configure	write	read
+checking_dispatcher	^$	^caldera\.checking\.exchange$	^$
 checking_consumer	^$	^$	^caldera\.checking\.instructions$
+checking_result_consumer	^$	^$	^caldera\.checking\.(api|agent)\.responses$
 monitor_user	^$	^$	^caldera\.checking\..*$
 caldera_admin	.*	.*	.*
 caldera_publisher	^$	^caldera\.checking\.exchange$	^$
-checking_worker	^$	^caldera\.checking\.(exchange|(api|agent)\.responses)$	^$
+checking_worker	^$	^caldera\.checking\.(exchange|(api|agent)\.responses)$	^caldera\.checking\.(api\.tasks|agent\.tasks)$
 
 ## Exchanges
 Listing exchanges for vhost /caldera_checking ...
@@ -43,19 +47,25 @@ amq.direct	direct
 Timeout: 60.0 seconds ...
 Listing queues for vhost /caldera_checking ...
 name	messages
-caldera.checking.agent.responses	2
-caldera.checking.api.responses	2
+caldera.checking.agent.tasks	0
+caldera.checking.agent.responses	1
+caldera.checking.api.responses	0
 caldera.checking.instructions	0
+caldera.checking.api.tasks	0
 
 ## Bindings
 Listing bindings for vhost /caldera_checking...
 source_name	source_kind	destination_name	destination_kind	routing_key	arguments
+	exchange	caldera.checking.agent.tasks	queue	caldera.checking.agent.tasks	[]
 	exchange	caldera.checking.agent.responses	queue	caldera.checking.agent.responses	[]
 	exchange	caldera.checking.api.responses	queue	caldera.checking.api.responses	[]
 	exchange	caldera.checking.instructions	queue	caldera.checking.instructions	[]
+	exchange	caldera.checking.api.tasks	queue	caldera.checking.api.tasks	[]
 caldera.checking.exchange	exchange	caldera.checking.instructions	queue	caldera.execution.result	[]
 caldera.checking.exchange	exchange	caldera.checking.agent.responses	queue	checking.agent.response	[]
+caldera.checking.exchange	exchange	caldera.checking.agent.tasks	queue	checking.agent.task	[]
 caldera.checking.exchange	exchange	caldera.checking.api.responses	queue	checking.api.response	[]
+caldera.checking.exchange	exchange	caldera.checking.api.tasks	queue	checking.api.task	[]
 
 ## Policies
 +-------------------+-------------------------+----------+-----------------------------------------------------------------+------------------------+----------+

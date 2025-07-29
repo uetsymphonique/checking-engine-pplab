@@ -22,14 +22,19 @@ The Checking Engine uses RabbitMQ as the central message broker to orchestrate P
 ```
 ┌─────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   Caldera   │───▶│   RabbitMQ      │───▶│ Checking Engine │
-│ (Red Team)  │    │ Message Broker  │    │  (Blue Team)    │
+│ (Red Team)  │    │ Message Broker  │    │  Backend        │
 └─────────────┘    └─────────────────┘    └─────────────────┘
-                            │
-                            ▼
-                   ┌─────────────────┐
-                   │ Detection       │
-                   │ Workers         │
-                   └─────────────────┘
+                            │                       │
+                            │                       ▼
+                            │              ┌─────────────────┐
+                            │              │   Dispatcher    │
+                            │              └─────────────────┘
+                            │                       │
+                            ▼                       ▼
+                   ┌─────────────────┐    ┌─────────────────┐
+                   │ Detection       │───▶│ Result          │
+                   │ Workers         │    │ Consumer        │
+                   └─────────────────┘    └─────────────────┘
 ```
 
 ### Design Principles
@@ -43,7 +48,7 @@ The Checking Engine uses RabbitMQ as the central message broker to orchestrate P
 
 ## Message Flow Design
 
-### Core Message Flow
+### Complete Message Flow
 
 ```
 ┌─────────────┐   publish   ┌─────────────────────┐   route   ┌──────────────────────┐
@@ -53,11 +58,35 @@ The Checking Engine uses RabbitMQ as the central message broker to orchestrate P
                                      │                                   │
                                      │                                   │ consume
                                      │                                   ▼
-                            ┌─────────────────────┐           ┌──────────────────────┐
-                            │ Detection Workers   │           │ Checking Engine      │
-                            │ (publish results)   │           │ Backend              │
-                            └─────────────────────┘           └──────────────────────┘
+                                     │                        ┌──────────────────────┐
+                                     │                        │ Checking Engine      │
+                                     │                        │ Backend Consumer     │
+                                     │                        └──────────────────────┘
+                                     │                                   │
+                                     │                                   │ process &
+                                     │                                   │ dispatch
+                                     │                                   ▼
+                                     │                        ┌──────────────────────┐
+                                     │                        │ Checking Engine      │
+                                     │              ┌─────────│ Dispatcher           │
+                                     │              │         └──────────────────────┘
+                                     │              │
+                                     │              ▼
+                   ┌─────────────────────────────────────────────┐
+                   │              Task Queues                    │
+                   │ ┌─────────────────┐ ┌───────────────────────┐│
+                   │ │ api.tasks       │ │ agent.tasks           ││
+                   │ └─────────────────┘ └───────────────────────┘│
+                   └─────────────────────────────────────────────┘
                                      │
+                                     │ consume
+                                     ▼
+                            ┌─────────────────────┐
+                            │ Detection Workers   │
+                            │ (consume & execute) │
+                            └─────────────────────┘
+                                     │
+                                     │ publish
                                      ▼
                    ┌─────────────────────────────────────────────┐
                    │              Response Queues                │
@@ -65,11 +94,18 @@ The Checking Engine uses RabbitMQ as the central message broker to orchestrate P
                    │ │ api.responses   │ │ agent.responses       ││
                    │ └─────────────────┘ └───────────────────────┘│
                    └─────────────────────────────────────────────┘
+                                     │
+                                     │ consume
+                                     ▼
+                            ┌─────────────────────┐
+                            │ Result Consumer     │
+                            │ (process results)   │
+                            └─────────────────────┘
 ```
 
 ### Message Types and Payloads
 
-#### 1. Execution Result Messages (Caldera → Checking Engine)
+#### 1. Execution Result Messages (Caldera → Backend Consumer)
 
 **Queue**: `caldera.checking.instructions`  
 **Routing Key**: `caldera.execution.result`
@@ -111,7 +147,34 @@ The Checking Engine uses RabbitMQ as the central message broker to orchestrate P
 }
 ```
 
-#### 2. Detection Response Messages (Workers → Checking Engine)
+#### 2. Detection Task Messages (Dispatcher → Workers)
+
+**Queues**: `caldera.checking.api.tasks`, `caldera.checking.agent.tasks`  
+**Routing Keys**: `checking.api.task`, `checking.agent.task`
+
+```json
+{
+  "task_id": "task-uuid-12345",
+  "operation_id": "op-12345",
+  "detection_type": "api|agent",
+  "platform": "siem|edr|windows|linux",
+  "query": {
+    "type": "splunk_search|powershell_command|bash_command",
+    "content": "search index=security user=administrator",
+    "timeout_seconds": 30
+  },
+  "metadata": {
+    "priority": "high|medium|low",
+    "created_at": "2024-01-15T10:30:30Z",
+    "execution_context": {
+      "original_command": "whoami",
+      "target_host": "target-machine.local"
+    }
+  }
+}
+```
+
+#### 3. Detection Response Messages (Workers → Result Consumer)
 
 **Queues**: `caldera.checking.api.responses`, `caldera.checking.agent.responses`  
 **Routing Keys**: `checking.api.response`, `checking.agent.response`
@@ -119,6 +182,7 @@ The Checking Engine uses RabbitMQ as the central message broker to orchestrate P
 ```json
 {
   "detection_id": "det-67890",
+  "task_id": "task-uuid-12345",
   "execution_id": "exec-12345",
   "detection_type": "api|agent",
   "platform": "siem|edr|windows|linux",
@@ -139,47 +203,21 @@ The Checking Engine uses RabbitMQ as the central message broker to orchestrate P
 }
 ```
 
-## Security Model
-
-### Virtual Host Isolation
-
-- **Virtual Host**: `/caldera_checking`
-- **Purpose**: Complete isolation from default RabbitMQ setup
-- **Benefits**: Security boundary, resource isolation, easier management
-
-### Authentication and Authorization
-
-#### Password Security
-- **Generation**: Cryptographically secure random passwords (32 characters)
-- **Storage**: `rabbitmq_passwords.txt` with restricted permissions (600)
-- **Rotation**: Manual rotation recommended every 90 days
-
-#### TLS/SSL (Production Consideration)
-```
-# Future enhancement for production
-ssl_options.cacertfile = /etc/rabbitmq/ca_certificate.pem
-ssl_options.certfile = /etc/rabbitmq/server_certificate.pem
-ssl_options.keyfile = /etc/rabbitmq/server_key.pem
-```
-
 ## Exchange and Queue Structure
 
-### Exchange Design
+### Exchange: `caldera.checking.exchange`
 
-#### Main Topic Exchange: `caldera.checking.exchange`
+```yaml
+Type: topic
+Durable: true
+Auto-delete: false
+Internal: false
+Arguments: {}
+```
 
-- **Type**: `topic`
-- **Durability**: `true` (survives broker restart)
-- **Auto-delete**: `false`
-- **Arguments**: None
+**Purpose**: Central routing hub for all Checking Engine messages using topic-based routing.
 
-**Why Topic Exchange?**
-- Flexible routing based on routing keys
-- Supports future message types without reconfiguration
-- Pattern-based routing: `caldera.*`, `checking.*`
-- Extensible for new detection platforms
-
-### Queue Design
+### Queue Structure (5 Queues Total)
 
 #### 1. Instructions Queue: `caldera.checking.instructions`
 
@@ -187,64 +225,94 @@ ssl_options.keyfile = /etc/rabbitmq/server_key.pem
 Properties:
   - Durable: true
   - Auto-delete: false
-  # Queue arguments applied via policy, not at creation
+  # Queue arguments applied via policy
 
 Binding:
   - Exchange: caldera.checking.exchange
-  - Routing Key: caldera.execution.result  # Specific routing key from scripts
+  - Routing Key: caldera.execution.result
 ```
 
-**Purpose**: Receives execution results from Caldera for processing
+**Purpose**: Receives Red Team execution results from Caldera for processing by the backend consumer.
 
-#### 2. API Responses Queue: `caldera.checking.api.responses`
+#### 2. API Tasks Queue: `caldera.checking.api.tasks`
 
 ```yaml
 Properties:
   - Durable: true
   - Auto-delete: false
-  # Queue arguments applied via policy, not at creation
 
 Binding:
   - Exchange: caldera.checking.exchange
-  - Routing Key: checking.api.response  # Specific routing key from scripts
+  - Routing Key: checking.api.task
 ```
 
-**Purpose**: Collects detection results from API-based workers (SIEM, EDR APIs)
+**Purpose**: Dispatches detection tasks to API-based workers (SIEM, EDR).
 
-#### 3. Agent Responses Queue: `caldera.checking.agent.responses`
+#### 3. Agent Tasks Queue: `caldera.checking.agent.tasks`
 
 ```yaml
 Properties:
   - Durable: true
-  - Auto-delete: false  
-  # Queue arguments applied via policy, not at creation
+  - Auto-delete: false
 
 Binding:
   - Exchange: caldera.checking.exchange
-  - Routing Key: checking.agent.response  # Specific routing key from scripts
+  - Routing Key: checking.agent.task
 ```
 
-**Purpose**: Collects detection results from agent-based workers (host commands)
+**Purpose**: Dispatches detection tasks to agent-based workers (PowerShell, Bash).
+
+#### 4. API Responses Queue: `caldera.checking.api.responses`
+
+```yaml
+Properties:
+  - Durable: true
+  - Auto-delete: false
+
+Binding:
+  - Exchange: caldera.checking.exchange
+  - Routing Key: checking.api.response
+```
+
+**Purpose**: Collects detection results from API-based workers.
+
+#### 5. Agent Responses Queue: `caldera.checking.agent.responses`
+
+```yaml
+Properties:
+  - Durable: true
+  - Auto-delete: false
+
+Binding:
+  - Exchange: caldera.checking.exchange
+  - Routing Key: checking.agent.response
+```
+
+**Purpose**: Collects detection results from agent-based workers.
 
 ### Routing Key Strategy
 
 | Routing Key | Source | Destination | Purpose |
 |-------------|---------|-------------|---------|
 | `caldera.execution.result` | Caldera Publisher | instructions queue | Red Team execution results |
-| `checking.api.response` | API Workers | api.responses queue | SIEM/EDR detection results |
-| `checking.agent.response` | Agent Workers | agent.responses queue | Host-based detection results |
+| `checking.api.task` | Backend Dispatcher | api.tasks queue | Tasks for API workers |
+| `checking.agent.task` | Backend Dispatcher | agent.tasks queue | Tasks for agent workers |
+| `checking.api.response` | API Workers | api.responses queue | API detection results |
+| `checking.agent.response` | Agent Workers | agent.responses queue | Agent detection results |
 
 ## User Roles and Permissions
 
-### Role-Based Access Control Matrix
+### Role-Based Access Control Matrix (7 Users)
 
 | User | Virtual Host | Configure | Write | Read | Description |
 |------|-------------|-----------|-------|------|-------------|
 | `caldera_admin` | `/caldera_checking` | `.*` | `.*` | `.*` | Full administrative access |
-| `caldera_publisher` | `/caldera_checking` | `` | `^caldera\.checking\.exchange$` | `` | Red Team publisher only |
-| `checking_consumer` | `/caldera_checking` | `` | `` | `^caldera\.checking\.instructions$` | Blue Team backend consumer |
-| `checking_worker` | `/caldera_checking` | `` | `^caldera\.checking\.(exchange\|(api\|agent)\.responses)$` | `` | Detection workers publisher |
-| `monitor_user` | `/caldera_checking` | `` | `` | `.*` | Read-only monitoring access |
+| `caldera_publisher` | `/caldera_checking` | `^$` | `^caldera\.checking\.exchange$` | `^$` | Red Team publisher only |
+| `checking_consumer` | `/caldera_checking` | `^$` | `^$` | `^caldera\.checking\.instructions$` | Backend consumer |
+| `checking_dispatcher` | `/caldera_checking` | `^$` | `^caldera\.checking\.exchange$` | `^$` | Task dispatcher |
+| `checking_worker` | `/caldera_checking` | `^$` | `^caldera\.checking\.(exchange\|(api\|agent)\.responses)$` | `^caldera\.checking\.(api\.tasks\|agent\.tasks)$` | Detection workers |
+| `checking_result_consumer` | `/caldera_checking` | `^$` | `^$` | `^caldera\.checking\.(api\|agent)\.responses$` | Result processor |
+| `monitor_user` | `/caldera_checking` | `^$` | `^$` | `^caldera\.checking\..*$` | Read-only monitoring |
 
 ### Permission Analysis
 
@@ -260,7 +328,7 @@ Configure: (none)
 
 **Security Rationale**: Red Team should only send execution results, not access Blue Team data.
 
-#### 2. Checking Consumer (Blue Team Backend)
+#### 2. Checking Consumer (Backend Consumer)
 ```bash
 # Cannot publish anywhere
 Write: (none)
@@ -270,34 +338,75 @@ Read: ^caldera\.checking\.instructions$
 Configure: (none)
 ```
 
-**Security Rationale**: Backend only processes incoming instructions, doesn't publish results directly.
+**Security Rationale**: Backend consumer only processes incoming instructions, doesn't publish directly.
 
-#### 3. Checking Worker (Detection Workers)
+#### 3. Checking Dispatcher (Backend Dispatcher)
 ```bash
-# Can publish to exchange and response queues
-Write: ^caldera\.checking\.(exchange|(api|agent)\.responses)$
+# Can only publish to main exchange
+Write: ^caldera\.checking\.exchange$
 # Cannot read any queues
 Read: (none)
 # Cannot configure topology
 Configure: (none)
 ```
 
-**Security Rationale**: Workers receive tasks through backend, only publish results.
+**Security Rationale**: Dispatcher only sends tasks to workers, doesn't consume responses directly.
+
+#### 4. Checking Worker (Detection Workers)
+```bash
+# Can publish to exchange and response queues
+Write: ^caldera\.checking\.(exchange|(api|agent)\.responses)$
+# Can read from task queues only
+Read: ^caldera\.checking\.(api\.tasks|agent\.tasks)$
+# Cannot configure topology
+Configure: (none)
+```
+
+**Security Rationale**: Workers consume tasks and publish results, following the detection workflow.
+
+#### 5. Checking Result Consumer (Result Processor)
+```bash
+# Cannot publish anywhere
+Write: (none)
+# Can only read from response queues
+Read: ^caldera\.checking\.(api|agent)\.responses$
+# Cannot configure topology
+Configure: (none)
+```
+
+**Security Rationale**: Result consumer only processes detection results, doesn't publish new messages.
+
+#### 6. Monitor User (Monitoring)
+```bash
+# Cannot publish anywhere
+Write: (none)
+# Can read all checking queues
+Read: ^caldera\.checking\..*$
+# Cannot configure topology
+Configure: (none)
+```
+
+**Security Rationale**: Monitoring user has read-only access for observability.
 
 ### Connection Limits
 
 ```yaml
 caldera_publisher:
   max-connections: 100
-  # max-channels: Not configured in current setup
 
 checking_consumer:
   max-connections: 100
-  # max-channels: Not configured in current setup
+
+checking_dispatcher:
+  max-connections: 100
 
 checking_worker:
   max-connections: 100
-  # max-channels: Not configured in current setup
+
+checking_result_consumer:
+  max-connections: 100
+
+# monitor_user and caldera_admin: No explicit limits (admin users)
 ```
 
 ### Checking Current Limits and Usage
@@ -305,16 +414,22 @@ checking_worker:
 To verify actual connection limits and current usage:
 
 ```bash
-# Check user connection limits
+# Check user connection limits (all 7 users)
 sudo rabbitmqctl list_user_limits --user caldera_publisher
 sudo rabbitmqctl list_user_limits --user checking_consumer
+sudo rabbitmqctl list_user_limits --user checking_dispatcher
 sudo rabbitmqctl list_user_limits --user checking_worker
+sudo rabbitmqctl list_user_limits --user checking_result_consumer
 
 # Check current active connections
 sudo rabbitmqctl list_connections user state
 
 # Count connections per user
 sudo rabbitmqctl list_connections user | grep -c caldera_publisher
+sudo rabbitmqctl list_connections user | grep -c checking_consumer
+sudo rabbitmqctl list_connections user | grep -c checking_dispatcher
+sudo rabbitmqctl list_connections user | grep -c checking_worker
+sudo rabbitmqctl list_connections user | grep -c checking_result_consumer
 
 # Check current channels
 sudo rabbitmqctl list_channels user connection state
@@ -332,24 +447,26 @@ sudo rabbitmqctl list_channels user | grep -c caldera_publisher
 Policy: caldera-checking-limits
 Pattern: ^caldera\.checking\..*
 Definition:
-  max-length: 10000           # Actual value from scripts
-  message-ttl: 3600000        # 1 hour (actual value)
+  max-length: 10000           # Maximum messages per queue
+  message-ttl: 3600000        # 1 hour TTL
   ha-mode: all                # High availability for all nodes
 ```
 
-**Note**: The setup scripts configure basic policies. Production may need additional tuning for `max-length-bytes` and `overflow` behavior.
+**Applied to all 5 queues**: instructions, api.tasks, agent.tasks, api.responses, agent.responses
 
 ### Scaling Considerations
 
 #### Horizontal Scaling
 - **Multiple Workers**: Each worker type can run multiple instances
+- **Multiple Dispatchers**: Dispatcher can be scaled horizontally
+- **Multiple Result Consumers**: Result processing can be parallelized
 - **Queue Partitioning**: Consider sharding by operation_id for very high throughput
 - **Federation**: Multi-datacenter deployment support
 
 #### Vertical Scaling
-- **Memory**: Monitor queue depths and message sizes
+- **Memory**: Monitor queue depths and message sizes across 5 queues
 - **Disk**: Enable lazy queues for large message backlogs
-- **CPU**: Monitor exchange routing performance
+- **CPU**: Monitor exchange routing performance with 5 routing keys
 
 ### Performance Tuning
 
@@ -371,51 +488,57 @@ sudo rabbitmqctl set_policy lazy-queues "^caldera\.checking\." \
 
 ### Key Metrics
 
-#### Queue Metrics
+#### Queue Metrics (5 Queues)
 - **Message Rates**: publish/deliver/ack rates per queue
-- **Queue Depths**: Current message counts
+- **Queue Depths**: Current message counts for all 5 queues
 - **Consumer Utilization**: Active consumers per queue
 - **Message TTL Expiry**: Expired message counts
+- **Task Processing Time**: Time from task dispatch to result
 
 #### System Metrics
 - **Memory Usage**: RabbitMQ memory consumption
 - **Disk Usage**: Message store and index sizes
-- **Network I/O**: Message throughput
-- **Connection Counts**: Per-user connection usage
+- **Network I/O**: Message throughput across all workflows
+- **Connection Counts**: Per-user connection usage (7 users)
 
 ### Alerting Thresholds
 
 ```yaml
 Critical:
-  - Queue depth > 5000 messages
+  - Queue depth > 5000 messages (any of 5 queues)
   - Memory usage > 80%
   - Disk free < 1GB
-  - No consumers for > 5 minutes
+  - No consumers for > 5 minutes (tasks or responses)
+  - Task processing timeout > 5 minutes
 
 Warning:
   - Queue depth > 1000 messages
   - Memory usage > 60%
   - Message TTL expiry rate > 10/min
   - Connection failure rate > 1%
+  - Unbalanced task distribution between workers
 ```
 
 ### Operational Tools
 
 #### Management UI
 - **URL**: `http://localhost:15672`
-- **Users**: Any user can login with monitoring capabilities
+- **Users**: Any user with management tag can login
 - **Features**: Queue stats, message tracing, topology visualization
 
 #### CLI Monitoring
 ```bash
-# Queue status
+# Queue status (all 5 queues)
 sudo rabbitmqctl list_queues -p /caldera_checking name messages
 
-# User connections  
+# User connections (7 users)
 sudo rabbitmqctl list_connections user peer_host
 
 # Memory usage
 sudo rabbitmqctl status | grep memory
+
+# Check specific queue depths
+sudo rabbitmqctl list_queues -p /caldera_checking name messages | grep -E "(instructions|tasks|responses)"
 ```
 
 ## Integration Points
@@ -430,7 +553,11 @@ sudo rabbitmqctl status | grep memory
 async def _publish_to_queue(self, fwd_messages):
     """Publish execution results to RabbitMQ"""
     connection = await aio_pika.connect_robust(
-        f"amqp://caldera_publisher:{password}@localhost:5672/caldera_checking"
+        host="localhost",
+        port=5672,
+        login="caldera_publisher",
+        password=password,
+        virtualhost="/caldera_checking"
     )
     
     async with connection:
@@ -459,7 +586,11 @@ import json
 class CheckingEngineConsumer:
     async def start_consuming(self):
         connection = await aio_pika.connect_robust(
-            f"amqp://checking_consumer:{password}@localhost:5672/caldera_checking"
+            host="localhost",
+            port=5672,
+            login="checking_consumer",
+            password=password,
+            virtualhost="/caldera_checking"
         )
         
         channel = await connection.channel()
@@ -477,8 +608,58 @@ class CheckingEngineConsumer:
             # 2. Create detection tasks
             detection_tasks = await self.create_detection_tasks(data)
             
-            # 3. Send to appropriate workers
-            await self.dispatch_detection_tasks(detection_tasks)
+            # 3. Send to appropriate workers via dispatcher
+            await self.notify_dispatcher(detection_tasks)
+
+class CheckingEngineDispatcher:
+    async def dispatch_tasks(self, tasks):
+        connection = await aio_pika.connect_robust(
+            host="localhost",
+            port=5672,
+            login="checking_dispatcher",
+            password=password,
+            virtualhost="/caldera_checking"
+        )
+        
+        async with connection:
+            channel = await connection.channel()
+            exchange = await channel.get_exchange('caldera.checking.exchange')
+            
+            for task in tasks:
+                routing_key = f"checking.{task['detection_type']}.task"
+                message = aio_pika.Message(
+                    json.dumps(task).encode(),
+                    delivery_mode=aio_pika.DeliveryMode.PERSISTENT
+                )
+                
+                await exchange.publish(message, routing_key=routing_key)
+
+class CheckingEngineResultConsumer:
+    async def start_consuming(self):
+        connection = await aio_pika.connect_robust(
+            host="localhost",
+            port=5672,
+            login="checking_result_consumer",
+            password=password,
+            virtualhost="/caldera_checking"
+        )
+        
+        channel = await connection.channel()
+        api_queue = await channel.get_queue('caldera.checking.api.responses')
+        agent_queue = await channel.get_queue('caldera.checking.agent.responses')
+        
+        await api_queue.consume(self.process_detection_result)
+        await agent_queue.consume(self.process_detection_result)
+    
+    async def process_detection_result(self, message):
+        async with message.process():
+            result = json.loads(message.body.decode())
+            
+            # Store result in PostgreSQL
+            await self.store_detection_result(result)
+            
+            # Update execution status
+            await self.update_execution_status(result)
 ```
 
 ### Detection Workers Integration
@@ -486,9 +667,37 @@ class CheckingEngineConsumer:
 #### API Worker Pattern
 ```python
 class APIDetectionWorker:
+    async def start_working(self):
+        connection = await aio_pika.connect_robust(
+            host="localhost",
+            port=5672,
+            login="checking_worker",
+            password=password,
+            virtualhost="/caldera_checking"
+        )
+        
+        channel = await connection.channel()
+        task_queue = await channel.get_queue('caldera.checking.api.tasks')
+        
+        await task_queue.consume(self.process_detection_task)
+    
+    async def process_detection_task(self, message):
+        async with message.process():
+            task = json.loads(message.body.decode())
+            
+            # Execute detection query
+            result = await self.execute_detection(task)
+            
+            # Publish result
+            await self.publish_result(result)
+    
     async def publish_result(self, detection_result):
         connection = await aio_pika.connect_robust(
-            f"amqp://checking_worker:{password}@localhost:5672/caldera_checking"
+            host="localhost",
+            port=5672,
+            login="checking_worker",
+            password=password,
+            virtualhost="/caldera_checking"
         )
         
         async with connection:
@@ -510,23 +719,26 @@ class APIDetectionWorker:
 
 ### Phase 2 Considerations
 
-1. **Dead Letter Queues**: Handle failed message processing
+1. **Dead Letter Queues**: Handle failed message processing for all 5 queues
 2. **Message Compression**: Reduce bandwidth for large payloads  
-3. **Schema Validation**: JSON Schema validation for messages
+3. **Schema Validation**: JSON Schema validation for all message types
 4. **Encryption**: End-to-end message encryption
 5. **Federation**: Multi-site deployment support
 6. **Streaming**: RabbitMQ Streams for high-throughput scenarios
+7. **Priority Queues**: Priority-based task processing
 
 ### Operational Improvements
 
-1. **Automated Monitoring**: Prometheus + Grafana integration
-2. **Log Aggregation**: Centralized logging with ELK stack
+1. **Automated Monitoring**: Prometheus + Grafana integration for all 5 queues
+2. **Log Aggregation**: Centralized logging with ELK stack for all 7 users
 3. **Backup/Recovery**: Automated message store backups
-4. **Performance Testing**: Load testing framework
+4. **Performance Testing**: Load testing framework for complete workflow
 5. **Blue/Green Deployment**: Zero-downtime updates
+6. **Circuit Breakers**: Fault tolerance for worker failures
+7. **Auto-scaling**: Dynamic worker scaling based on queue depth
 
 ---
 
-**Document Version**: 1.0  
+**Document Version**: 2.0  
 **Last Updated**: 2024-01-15  
 **Next Review**: 2024-04-15 

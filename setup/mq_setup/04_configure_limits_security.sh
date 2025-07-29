@@ -85,7 +85,8 @@ check_prerequisites() {
     
     # Check if queues exist
     local queue_count=$(rabbitmqctl list_queues -p $VHOST | grep -c "caldera.checking" || true)
-    if [ $queue_count -ne 4 ]; then
+    # there are an additional keyword "caldera.checking" in message log, so we need to add 1
+    if [ $queue_count -ne 6 ]; then
         print_error "Queues not found. Run Phase 3 first."
         exit 1
     fi
@@ -106,6 +107,12 @@ configure_user_limits() {
     
     print_status "Setting connection limits for checking_worker..."
     rabbitmqctl set_user_limits -p $VHOST checking_worker '{"max-connections": 100}' >> $LOG_FILE 2>&1
+    
+    print_status "Setting connection limits for checking_dispatcher..."
+    rabbitmqctl set_user_limits -p $VHOST checking_dispatcher '{"max-connections": 100}' >> $LOG_FILE 2>&1
+    
+    print_status "Setting connection limits for checking_result_consumer..."
+    rabbitmqctl set_user_limits -p $VHOST checking_result_consumer '{"max-connections": 100}' >> $LOG_FILE 2>&1
     
     print_success "User resource limits configured"
 }
@@ -203,17 +210,27 @@ RABBITMQ_CONSUMER_PASS=<from_password_file>
 RABBITMQ_WORKER_USER=checking_worker
 RABBITMQ_WORKER_PASS=<from_password_file>
 
+RABBITMQ_DISPATCHER_USER=checking_dispatcher
+RABBITMQ_DISPATCHER_PASS=<from_password_file>
+
+RABBITMQ_RESULT_CONSUMER_USER=checking_result_consumer
+RABBITMQ_RESULT_CONSUMER_PASS=<from_password_file>
+
 RABBITMQ_MONITOR_USER=monitor_user
 RABBITMQ_MONITOR_PASS=<from_password_file>
 
 # Exchange and Queue Names
 RABBITMQ_EXCHANGE=caldera.checking.exchange
 RABBITMQ_INSTRUCTIONS_QUEUE=caldera.checking.instructions
+RABBITMQ_API_TASKS_QUEUE=caldera.checking.api.tasks
+RABBITMQ_AGENT_TASKS_QUEUE=caldera.checking.agent.tasks
 RABBITMQ_API_RESPONSES_QUEUE=caldera.checking.api.responses
 RABBITMQ_AGENT_RESPONSES_QUEUE=caldera.checking.agent.responses
 
 # Routing Keys
 ROUTING_KEY_EXECUTION_RESULT=caldera.execution.result
+ROUTING_KEY_API_TASK=checking.api.task
+ROUTING_KEY_AGENT_TASK=checking.agent.task
 ROUTING_KEY_API_RESPONSE=checking.api.response
 ROUTING_KEY_AGENT_RESPONSE=checking.agent.response
 EOF
@@ -277,6 +294,8 @@ display_config_info() {
     echo "  caldera_publisher: max 100 connections"
     echo "  checking_consumer: max 100 connections"
     echo "  checking_worker: max 100 connections"
+    echo "  checking_dispatcher: max 100 connections"
+    echo "  checking_result_consumer: max 100 connections"
     echo
     print_status "Queue Policies:"
     rabbitmqadmin -u caldera_admin -p $ADMIN_PASS -V $VHOST list policies

@@ -110,6 +110,15 @@ create_exchanges_and_queues() {
     print_status "Creating agent responses queue..."
     rabbitmqadmin -u $admin_user -p $ADMIN_PASS -V $VHOST declare queue \
         name=caldera.checking.agent.responses durable=true >> $LOG_FILE 2>&1
+
+    # New tasks queues
+    print_status "Creating API tasks queue..."
+    rabbitmqadmin -u $admin_user -p $ADMIN_PASS -V $VHOST declare queue \
+        name=caldera.checking.api.tasks durable=true >> $LOG_FILE 2>&1
+
+    print_status "Creating agent tasks queue..."
+    rabbitmqadmin -u $admin_user -p $ADMIN_PASS -V $VHOST declare queue \
+        name=caldera.checking.agent.tasks durable=true >> $LOG_FILE 2>&1
     
     print_success "Exchanges and queues created"
 }
@@ -140,6 +149,20 @@ create_bindings() {
         source=caldera.checking.exchange \
         destination=caldera.checking.agent.responses \
         routing_key=checking.agent.response >> $LOG_FILE 2>&1
+
+    # Binding for API tasks queue (dispatcher -> API worker)
+    print_status "Creating binding for API tasks queue..."
+    rabbitmqadmin -u $admin_user -p $ADMIN_PASS -V $VHOST declare binding \
+        source=caldera.checking.exchange \
+        destination=caldera.checking.api.tasks \
+        routing_key=checking.api.task >> $LOG_FILE 2>&1
+
+    # Binding for agent tasks queue (dispatcher -> agent worker)
+    print_status "Creating binding for agent tasks queue..."
+    rabbitmqadmin -u $admin_user -p $ADMIN_PASS -V $VHOST declare binding \
+        source=caldera.checking.exchange \
+        destination=caldera.checking.agent.tasks \
+        routing_key=checking.agent.task >> $LOG_FILE 2>&1
     
     print_success "Queue bindings created successfully"
 }
@@ -193,15 +216,16 @@ verify_phase3() {
     
     # Check queues exist
     local queue_count=$(rabbitmqctl list_queues -p $VHOST | grep -c "caldera.checking" || true)
-    if [ $queue_count -ne 4 ]; then
-        print_error "Not all queues were created (expected 3, found $queue_count)"
+    # there are an additional keyword "caldera.checking" in message log, so we need to add 1
+    if [ $queue_count -ne 6 ]; then
+        print_error "Not all queues were created (expected 5, found $queue_count)"
         return 1
     fi
     
     # Check bindings exist
     local binding_count=$(rabbitmqctl list_bindings -p $VHOST | grep -c "caldera.checking.exchange" || true)
-    if [ $binding_count -ne 3 ]; then
-        print_error "Not all bindings were created (expected 3, found $binding_count)"
+    if [ $binding_count -ne 5 ]; then
+        print_error "Not all bindings were created (expected 5, found $binding_count)"
         return 1
     fi
     

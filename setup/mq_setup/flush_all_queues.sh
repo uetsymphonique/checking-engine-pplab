@@ -94,6 +94,14 @@ flush_with_rabbitmqctl() {
     print_status "Purging caldera.checking.instructions..."
     sudo rabbitmqctl purge_queue caldera.checking.instructions -p $VHOST
     
+    # Purge api.tasks queue
+    print_status "Purging caldera.checking.api.tasks..."
+    sudo rabbitmqctl purge_queue caldera.checking.api.tasks -p $VHOST
+
+    # Purge agent.tasks queue
+    print_status "Purging caldera.checking.agent.tasks..."
+    sudo rabbitmqctl purge_queue caldera.checking.agent.tasks -p $VHOST
+
     # Purge api.responses queue
     print_status "Purging caldera.checking.api.responses..."
     sudo rabbitmqctl purge_queue caldera.checking.api.responses -p $VHOST
@@ -120,6 +128,22 @@ flush_with_rabbitmqadmin() {
         fi
     done
     
+    # Flush api.tasks queue
+    print_status "Flushing caldera.checking.api.tasks..."
+    while true; do
+        local result=$(rabbitmqadmin -u caldera_admin -p "$ADMIN_PASS" -V $VHOST get \
+            queue=caldera.checking.api.tasks ackmode=ack_requeue_false 2>/dev/null || echo "No messages")
+        if [[ "$result" == *"No messages"* ]]; then break; fi
+    done
+
+    # Flush agent.tasks queue
+    print_status "Flushing caldera.checking.agent.tasks..."
+    while true; do
+        local result=$(rabbitmqadmin -u caldera_admin -p "$ADMIN_PASS" -V $VHOST get \
+            queue=caldera.checking.agent.tasks ackmode=ack_requeue_false 2>/dev/null || echo "No messages")
+        if [[ "$result" == *"No messages"* ]]; then break; fi
+    done
+
     # Flush api.responses queue
     print_status "Flushing caldera.checking.api.responses..."
     while true; do
@@ -131,7 +155,7 @@ flush_with_rabbitmqadmin() {
         fi
     done
     
-    # Flush agent.responses queue
+    # Flush agent.responses queue  
     print_status "Flushing caldera.checking.agent.responses..."
     while true; do
         local result=$(rabbitmqadmin -u caldera_admin -p "$ADMIN_PASS" -V $VHOST get \

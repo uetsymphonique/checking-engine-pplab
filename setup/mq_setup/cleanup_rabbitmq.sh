@@ -95,7 +95,7 @@ confirm_action() {
 remove_users() {
     print_status "Removing checking engine users..."
     
-    local users=("caldera_admin" "caldera_publisher" "checking_consumer" "checking_worker" "monitor_user")
+    local users=("caldera_admin" "caldera_publisher" "checking_consumer" "checking_worker" "checking_dispatcher" "checking_result_consumer" "monitor_user")
     
     for user in "${users[@]}"; do
         if rabbitmqctl list_users | grep -q "^$user"; then
@@ -145,7 +145,7 @@ remove_rabbitmq_server() {
     systemctl disable rabbitmq-server >> $LOG_FILE 2>&1 || true
     
     # Remove packages
-    apt remove --purge -y rabbitmq-server rabbitmqadmin >> $LOG_FILE 2>&1 || true
+    apt remove --purge -y rabbitmq-server >> $LOG_FILE 2>&1 || true
     apt autoremove -y >> $LOG_FILE 2>&1 || true
     
     # Remove data directories

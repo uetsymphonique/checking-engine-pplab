@@ -92,6 +92,8 @@ create_users() {
     CONSUMER_PASS=$(generate_password)
     WORKER_PASS=$(generate_password)
     MONITOR_PASS=$(generate_password)
+    DISPATCHER_PASS=$(generate_password)
+    RESULT_PASS=$(generate_password)
     
     # Store passwords securely
     cat > $PASSWORDS_FILE << EOF
@@ -104,6 +106,8 @@ CALDERA_PUBLISHER_PASSWORD=$PUBLISHER_PASS
 CHECKING_CONSUMER_PASSWORD=$CONSUMER_PASS
 CHECKING_WORKER_PASSWORD=$WORKER_PASS
 MONITOR_USER_PASSWORD=$MONITOR_PASS
+CHECKING_DISPATCHER_PASSWORD=$DISPATCHER_PASS
+CHECKING_RESULT_CONSUMER_PASSWORD=$RESULT_PASS
 
 # Connection strings for applications:
 RABBITMQ_ADMIN_URL=amqp://caldera_admin:$ADMIN_PASS@localhost:5672$VHOST
@@ -111,6 +115,8 @@ RABBITMQ_PUBLISHER_URL=amqp://caldera_publisher:$PUBLISHER_PASS@localhost:5672$V
 RABBITMQ_CONSUMER_URL=amqp://checking_consumer:$CONSUMER_PASS@localhost:5672$VHOST
 RABBITMQ_WORKER_URL=amqp://checking_worker:$WORKER_PASS@localhost:5672$VHOST
 RABBITMQ_MONITOR_URL=amqp://monitor_user:$MONITOR_PASS@localhost:5672$VHOST
+RABBITMQ_DISPATCHER_URL=amqp://checking_dispatcher:$DISPATCHER_PASS@localhost:5672$VHOST
+RABBITMQ_RESULT_CONSUMER_URL=amqp://checking_result_consumer:$RESULT_PASS@localhost:5672$VHOST
 EOF
     
     chmod 600 $PASSWORDS_FILE
@@ -146,7 +152,25 @@ EOF
     rabbitmqctl set_permissions -p $VHOST checking_worker \
         "^$" \
         "^caldera\.checking\.(exchange|(api|agent)\.responses)$" \
+        "^caldera\.checking\.(api\.tasks|agent\.tasks)$" >> $LOG_FILE 2>&1
+
+    # 5. Dispatcher publisher user
+    print_status "Creating dispatcher publisher user..."
+    rabbitmqctl add_user checking_dispatcher $DISPATCHER_PASS >> $LOG_FILE 2>&1
+    rabbitmqctl set_user_tags checking_dispatcher management >> $LOG_FILE 2>&1
+    rabbitmqctl set_permissions -p $VHOST checking_dispatcher \
+        "^$" \
+        "^caldera\.checking\.exchange$" \
         "^$" >> $LOG_FILE 2>&1
+
+    # 6. Result consumer user
+    print_status "Creating result consumer user..."
+    rabbitmqctl add_user checking_result_consumer $RESULT_PASS >> $LOG_FILE 2>&1
+    rabbitmqctl set_user_tags checking_result_consumer management >> $LOG_FILE 2>&1
+    rabbitmqctl set_permissions -p $VHOST checking_result_consumer \
+        "^$" \
+        "^$" \
+        "^caldera\.checking\.(api|agent)\.responses$" >> $LOG_FILE 2>&1
     
     # Create monitor user
     print_status "Creating monitor user..."
@@ -165,6 +189,8 @@ EOF
     export CONSUMER_PASS
     export WORKER_PASS
     export MONITOR_PASS
+    export DISPATCHER_PASS
+    export RESULT_PASS
 }
 
 # Verify phase 2
@@ -179,7 +205,7 @@ verify_phase2() {
     
     # Check users
     local user_count=$(rabbitmqctl list_users | grep -c "caldera\|checking\|monitor" || true)
-    if [ $user_count -ne 5 ]; then
+    if [ $user_count -ne 7 ]; then
         print_error "Not all users were created successfully"
         return 1
     fi

@@ -144,8 +144,10 @@ load_passwords() {
     CONSUMER_PASS=$CHECKING_CONSUMER_PASSWORD
     WORKER_PASS=$CHECKING_WORKER_PASSWORD
     MONITOR_PASS=$MONITOR_USER_PASSWORD
+    DISPATCHER_PASS=$CHECKING_DISPATCHER_PASSWORD
+    RESULT_PASS=$CHECKING_RESULT_CONSUMER_PASSWORD
     
-    if [ -z "$ADMIN_PASS" ] || [ -z "$PUBLISHER_PASS" ] || [ -z "$CONSUMER_PASS" ] || [ -z "$WORKER_PASS" ] || [ -z "$MONITOR_PASS" ]; then
+    if [ -z "$ADMIN_PASS" ] || [ -z "$PUBLISHER_PASS" ] || [ -z "$CONSUMER_PASS" ] || [ -z "$WORKER_PASS" ] || [ -z "$MONITOR_PASS" ] || [ -z "$DISPATCHER_PASS" ] || [ -z "$RESULT_PASS" ]; then
         print_error "One or more passwords not found in passwords file"
         exit 1
     fi
@@ -287,17 +289,51 @@ step4_blue_team_backend() {
     print_result "✓ Step 4 completed: Blue Team backend processed execution result"
 }
 
-# Step 5: API Worker - SIEM detection
-step5_api_worker_siem() {
-    print_header "STEP 5: API Worker - SIEM Detection Execution"
-    
-    print_usecase "SCENARIO: API worker executes SIEM detection and reports results"
-    print_explanation "The API worker queries external SIEM system and finds 3 suspicious admin logon events."
-    print_explanation "This simulates successful detection of Red Team activity through log analysis."
-    
-    if ! wait_for_user "simulate API worker SIEM detection"; then
+# Step 5: Dispatcher publishes detection tasks
+step5_dispatcher_publish_tasks() {
+    print_header "STEP 5: Dispatcher Publishes Detection Tasks"
+
+    print_usecase "SCENARIO: Backend dispatcher sends tasks to workers"
+    print_explanation "We publish two task messages: one for API worker, one for Agent worker."
+
+    if ! wait_for_user "publish detection tasks via dispatcher"; then
         return 0
     fi
+
+    local api_task='{"task_id": "task-api-001", "detection_type": "api", "platform": "siem"}'
+    local agent_task='{"task_id": "task-agent-001", "detection_type": "agent", "platform": "windows"}'
+
+    local cmd1="rabbitmqadmin -u checking_dispatcher -p '$DISPATCHER_PASS' -V $VHOST publish exchange=caldera.checking.exchange routing_key=checking.api.task payload='$api_task'"
+    explain_command "$cmd1" "Publish API detection task"
+    execute_and_show "$cmd1" "Dispatcher publishes API task"
+
+    local cmd2="rabbitmqadmin -u checking_dispatcher -p '$DISPATCHER_PASS' -V $VHOST publish exchange=caldera.checking.exchange routing_key=checking.agent.task payload='$agent_task'"
+    explain_command "$cmd2" "Publish Agent detection task"
+    execute_and_show "$cmd2" "Dispatcher publishes Agent task"
+
+    print_result "✓ Step 5 completed: Dispatcher published tasks"
+}
+
+# Step 6: API Worker consumes task and executes SIEM detection
+step6_api_worker_siem() {
+    print_header "STEP 6: API Worker - Consume Task & Execute SIEM Detection"
+    
+    print_usecase "SCENARIO: API worker consumes task from API tasks queue, then executes SIEM detection"
+    print_explanation "First, the worker gets the detection task, then queries external SIEM system."
+    print_explanation "This simulates the complete workflow: task consumption → detection execution → result publishing."
+    
+    if ! wait_for_user "simulate API worker complete workflow"; then
+        return 0
+    fi
+
+    # Step 6a: Worker consumes API task
+    print_step "6a: Worker consumes API detection task"
+    local cmd_consume="rabbitmqadmin -u checking_worker -p '$WORKER_PASS' -V $VHOST get queue=caldera.checking.api.tasks ackmode=ack_requeue_false"
+    explain_command "$cmd_consume" "Worker consumes API detection task from tasks queue"
+    execute_and_show "$cmd_consume" "API worker consumes detection task"
+
+    print_explanation "Worker now processes the task and executes SIEM detection..."
+    sleep 1
     
     local api_result_payload='{
         "detection_id": "det-001", 
@@ -308,9 +344,11 @@ step5_api_worker_siem() {
         "timestamp": "'$(date -Iseconds)'"
     }'
     
+    # Step 6b: Worker publishes detection result
+    print_step "6b: Worker publishes SIEM detection results"
     local cmd="rabbitmqadmin -u checking_worker -p '$WORKER_PASS' -V $VHOST publish exchange=caldera.checking.exchange routing_key=checking.api.response payload='$api_result_payload'"
     
-    explain_command "$cmd" "Publish SIEM detection results"
+    explain_command "$cmd" "Publish SIEM detection results after task completion"
     print_explanation "Arguments breakdown:"
     print_explanation "  -u checking_worker: Use worker user (Blue Team worker credentials)"
     print_explanation "  -p \$WORKER_PASS: Worker password from secure file"
@@ -319,20 +357,29 @@ step5_api_worker_siem() {
     
     execute_and_show "$cmd" "API worker publishes SIEM detection results"
     
-    print_result "✓ Step 5 completed: SIEM detection found suspicious activity"
+    print_result "✓ Step 6 completed: SIEM detection found suspicious activity"
 }
 
-# Step 6: Agent Worker - Windows detection
-step6_agent_worker_windows() {
-    print_header "STEP 6: Agent Worker - Windows Agent Detection"
+# Step 7: Agent Worker - Windows detection
+step7_agent_worker_windows() {
+    print_header "STEP 7: Agent Worker - Consume Task & Execute Windows Detection"
     
-    print_usecase "SCENARIO: Agent worker executes Windows detection and reports results"
-    print_explanation "The agent worker runs PowerShell commands on Windows host but finds no events."
+    print_usecase "SCENARIO: Agent worker consumes task from agent tasks queue, then executes Windows detection"
+    print_explanation "First, the worker gets the detection task, then runs PowerShell commands on Windows host."
     print_explanation "This simulates potential detection evasion or timing issues in host-based detection."
     
-    if ! wait_for_user "simulate Agent worker Windows detection"; then
+    if ! wait_for_user "simulate Agent worker complete workflow"; then
         return 0
     fi
+
+    # Step 7a: Worker consumes agent task
+    print_step "7a: Worker consumes agent detection task"
+    local cmd_consume="rabbitmqadmin -u checking_worker -p '$WORKER_PASS' -V $VHOST get queue=caldera.checking.agent.tasks ackmode=ack_requeue_false"
+    explain_command "$cmd_consume" "Worker consumes agent detection task from tasks queue"
+    execute_and_show "$cmd_consume" "Agent worker consumes detection task"
+
+    print_explanation "Worker now processes the task and executes Windows detection..."
+    sleep 1
     
     local agent_result_payload='{
         "detection_id": "det-002",
@@ -343,9 +390,11 @@ step6_agent_worker_windows() {
         "timestamp": "'$(date -Iseconds)'"
     }'
     
+    # Step 7b: Worker publishes detection result
+    print_step "7b: Worker publishes Windows detection results"
     local cmd="rabbitmqadmin -u checking_worker -p '$WORKER_PASS' -V $VHOST publish exchange=caldera.checking.exchange routing_key=checking.agent.response payload='$agent_result_payload'"
     
-    explain_command "$cmd" "Publish Windows agent detection results"
+    explain_command "$cmd" "Publish Windows agent detection results after task completion"
     print_explanation "Arguments breakdown:"
     print_explanation "  routing_key=checking.agent.response: Routes to agent.responses queue"
     print_explanation "  payload=...: JSON with detection results (0 events found, detection failed)"
@@ -353,15 +402,16 @@ step6_agent_worker_windows() {
     
     execute_and_show "$cmd" "Agent worker publishes Windows detection results"
     
-    print_result "✓ Step 6 completed: Windows detection found no events (potential evasion)"
+    print_result "✓ Step 7 completed: Windows detection found no events (potential evasion)"
 }
 
-# Step 7: Final verification
-step7_final_verification() {
-    print_header "STEP 7: Complete Purple Team Workflow Verification"
+# Step 8: Final verification
+step8_final_verification() {
+    print_header "STEP 8: Complete Purple Team Workflow Verification"
     
     print_explanation "Check final state of all queues to verify complete message flow."
-    print_explanation "Expected: instructions=0, api.responses=1, agent.responses=1"
+    print_explanation "Expected: instructions=0, api.tasks=0, agent.tasks=0, api.responses=1, agent.responses=1"
+    print_explanation "This confirms: tasks consumed → detections executed → results published"
     
     if ! wait_for_user "verify complete workflow"; then
         return 0
@@ -375,16 +425,17 @@ step7_final_verification() {
     print_explanation "Workflow Summary:"
     print_explanation "  ✓ Red Team → Published execution result → Instructions queue"
     print_explanation "  ✓ Blue Team Backend → Consumed and processed → Detection tasks created"
-    print_explanation "  ✓ API Worker → SIEM detection → Found 3 suspicious events"
-    print_explanation "  ✓ Agent Worker → Windows detection → Found 0 events (evasion?)"
+    print_explanation "  ✓ Dispatcher → Published tasks → API & Agent tasks queues"
+    print_explanation "  ✓ API Worker → Consumed task → SIEM detection → Found 3 suspicious events"
+    print_explanation "  ✓ Agent Worker → Consumed task → Windows detection → Found 0 events (evasion?)"
     print_explanation "  ✓ Results → Stored in response queues → Ready for backend processing"
     
-    print_result "✓ Step 7 completed: Complete Purple Team workflow verified"
+    print_result "✓ Step 8 completed: Complete Purple Team workflow verified"
 }
 
-# Step 8: Cleanup test messages
-step8_cleanup() {
-    print_header "STEP 8: Cleanup Test Messages (Optional)"
+# Step 9: Cleanup test messages
+step9_cleanup() {
+    print_header "STEP 9: Cleanup Test Messages (Optional)"
     
     print_explanation "Remove test messages from response queues to clean up the environment."
     print_explanation "This is optional - you may want to keep messages for further inspection."
@@ -409,7 +460,7 @@ step8_cleanup() {
     explain_command "$cmd3" "Verify all queues are empty after cleanup"
     execute_and_show "$cmd3" "Final queue state verification"
     
-    print_result "✓ Step 8 completed: Test environment cleaned up"
+    print_result "✓ Step 9 completed: Test environment cleaned up"
 }
 
 # Main execution
@@ -449,10 +500,11 @@ main() {
     step2_red_team_simulation
     step3_verify_routing
     step4_blue_team_backend
-    step5_api_worker_siem
-    step6_agent_worker_windows
-    step7_final_verification
-    step8_cleanup
+    step5_dispatcher_publish_tasks
+    step6_api_worker_siem
+    step7_agent_worker_windows
+    step8_final_verification
+    step9_cleanup
     
     print_header "INTERACTIVE TEST COMPLETED"
     print_result "🎉 All steps completed successfully!"
