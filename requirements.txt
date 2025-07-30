@@ -1,0 +1,14 @@
+# Core web framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# Database
+sqlalchemy==2.0.23
+asyncpg==0.29.0
+
+# Message queue (already in use)
+aio-pika==9.4.3
+
+# Configuration and validation
+pydantic==2.4.2
+python-dotenv==1.0.0 

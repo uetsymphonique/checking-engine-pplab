@@ -1,3 +1,5 @@
 .env
 *.log
 *password*
+venv/
+__pycache__/

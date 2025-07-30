@@ -61,7 +61,8 @@ CREATE TABLE IF NOT EXISTS detection_executions (
     completed_at TIMESTAMPTZ,
     retry_count INTEGER DEFAULT 0,
     max_retries INTEGER DEFAULT 3,
-    execution_metadata JSONB DEFAULT '{}'::jsonb  -- Timing, errors, context
+    execution_metadata JSONB DEFAULT '{}'::jsonb,  -- Timing, errors, context
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 COMMENT ON TABLE detection_executions IS 'BLUE team detection execution tracking';
@@ -80,7 +81,8 @@ CREATE TABLE IF NOT EXISTS detection_results (
     parsed_results JSONB,  -- Structured/parsed detection results
     result_timestamp TIMESTAMPTZ DEFAULT NOW(),
     result_source VARCHAR(255),  -- API endpoint, hostname, etc.
-    metadata JSONB DEFAULT '{}'::jsonb  -- Confidence, severity, rules matched
+    metadata JSONB DEFAULT '{}'::jsonb,  -- Confidence, severity, rules matched
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 COMMENT ON TABLE detection_results IS 'BLUE team detection results from security controls';

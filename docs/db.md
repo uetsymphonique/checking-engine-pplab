@@ -12,19 +12,21 @@ The system uses the following PostgreSQL database configuration:
 
 - **Host**: localhost
 - **Port**: 5432 (default)
-- **Database**: [lab db]
-- **Username**: [lab user]
+- **Database**: caldera_purple
+- **Username**: db_caldera
 - **Password**: [configured separately]
+- **Schema**: checking_engine (dedicated schema for isolation)
 
 ### Setup Scripts
 
 All database setup scripts are located in the `setup/db_setup` directory:
 
-- `setup/db_setup/01_create_tables.sql` - Creates all tables and constraints
+- `setup/db_setup/00_create_schema.sql` - Creates the `checking_engine` schema and user permissions
+- `setup/db_setup/01_create_tables.sql` - Creates all tables and constraints in the schema
 - `setup/db_setup/02_create_indexes.sql` - Creates performance indexes
 - `setup/db_setup/03_create_extensions.sql` - Installs required PostgreSQL extensions
 - `setup/db_setup/04_sample_data.sql` - Optional sample data for testing
-- `setup/db_setup/run_setup.sh` - Bash script to execute all setup files
+- `setup/db_setup/run_setup.sh` - Bash script to execute all setup files in order
 
 To initialize the database, run:
 
@@ -35,7 +37,7 @@ cd setup/db_setup/
 
 ## Architecture
 
-The database is designed to support:
+The database uses a dedicated `checking_engine` schema for isolation and is designed to support:
 - Storage of RED team execution results from Caldera operations
 - Management of BLUE team detection executions across multiple platforms
 - Flexible detection configuration for API queries and agent commands
@@ -348,14 +350,14 @@ SELECT cron.schedule('cleanup-old-data', '0 2 * * *', 'SELECT cleanup_old_data()
 ## Extension Recommendations
 
 ```sql
--- Required extensions
+-- Required extensions (automatically installed by setup scripts)
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";    -- UUID generation
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";      -- Text similarity search
 CREATE EXTENSION IF NOT EXISTS "btree_gin";    -- Optimized GIN indexes
 
--- Optional extensions
-CREATE EXTENSION IF NOT EXISTS "pg_cron";      -- Scheduled tasks
-CREATE EXTENSION IF NOT EXISTS "pg_stat_statements";  -- Query performance monitoring
+-- Optional extensions (commented out in setup, uncomment if needed)
+-- CREATE EXTENSION IF NOT EXISTS "pg_cron";      -- Scheduled tasks (requires superuser)
+-- CREATE EXTENSION IF NOT EXISTS "pg_stat_statements";  -- Query performance monitoring (requires superuser)
 ```
 
 ## Common Queries
@@ -419,40 +421,49 @@ Initial database setup:
 
 ```sql
 -- Create database
-CREATE DATABASE caldera_checking_engine;
+CREATE DATABASE caldera_purple;
 
--- Connect to the database and create tables
-\c caldera_checking_engine;
+-- Create user (if not exists)
+CREATE USER db_caldera WITH PASSWORD 'your_password_here';
 
--- Run table creation scripts in order:
--- 1. operations
--- 2. execution_results  
--- 3. detection_executions
--- 4. detection_results
--- 5. indexes
--- 6. extensions
+-- Connect to the database and create schema
+\c caldera_purple;
+
+-- Create dedicated schema
+CREATE SCHEMA checking_engine AUTHORIZATION db_caldera;
+
+-- Set search path
+ALTER USER db_caldera SET search_path TO checking_engine, public;
+
+-- Run setup scripts in order:
+-- 1. 00_create_schema.sql (already done above)
+-- 2. 01_create_tables.sql
+-- 3. 02_create_indexes.sql  
+-- 4. 03_create_extensions.sql
+-- 5. 04_sample_data.sql (optional)
 ```
 
 ## Backup Strategy
 
 ```bash
 # Daily backup
-pg_dump -h localhost -U caldera_user -d caldera_checking_engine \
+pg_dump -h localhost -U db_caldera -d caldera_purple \
     --format=custom --compress=9 \
     > backup_$(date +%Y%m%d).dump
 
 # Restore
-pg_restore -h localhost -U caldera_user -d caldera_checking_engine \
+pg_restore -h localhost -U db_caldera -d caldera_purple \
     --clean --if-exists backup_20250123.dump
 ```
 
 ## Security Considerations
 
-1. **Database User Permissions**: Create separate users with minimal required permissions
-2. **Connection Security**: Use SSL/TLS for database connections
-3. **Data Encryption**: Consider encryption at rest for sensitive detection data
-4. **Audit Logging**: Enable PostgreSQL audit logging for compliance
-5. **Access Control**: Implement row-level security if multi-tenant support is needed
+1. **Database User Permissions**: The `db_caldera` user has dedicated permissions on the `checking_engine` schema
+2. **Schema Isolation**: Using dedicated `checking_engine` schema provides namespace isolation
+3. **Connection Security**: Use SSL/TLS for database connections
+4. **Data Encryption**: Consider encryption at rest for sensitive detection data
+5. **Audit Logging**: Enable PostgreSQL audit logging for compliance
+6. **Access Control**: Implement row-level security if multi-tenant support is needed
 
 ---
 
