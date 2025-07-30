@@ -12,10 +12,6 @@ from datetime import datetime, timezone
 from uuid import uuid4
 import httpx
 
-# Add src to path to import checking_engine
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-
-from checking_engine.main import app
 
 
 class OperationsCRUDTest:
