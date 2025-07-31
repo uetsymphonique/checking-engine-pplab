@@ -11,6 +11,9 @@ from ...schemas.execution import (
     ExecutionResultResponse, 
     ExecutionResultListResponse
 )
+from ...utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/executions", tags=["executions"])
 

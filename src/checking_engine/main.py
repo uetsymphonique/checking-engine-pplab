@@ -5,8 +5,16 @@ from contextlib import asynccontextmanager
 from checking_engine.config import settings
 from checking_engine.database.connection import db
 from checking_engine.api.v1.router import router as v1_router
-from checking_engine.mq.execution_consumer import ExecutionResultConsumer
-from checking_engine.utils.logging import get_logger
+from checking_engine.mq.consumers import CalderaExecutionConsumer
+from checking_engine.utils.logging import get_logger, setup_logging
+
+# Initialize logging with config settings
+setup_logging(
+    log_level=settings.log_level,
+    log_file=settings.log_file,
+    json_format=settings.log_json_format,
+    console_output=settings.log_console_output
+)
 
 logger = get_logger(__name__)
 
@@ -21,7 +29,7 @@ async def lifespan(app: FastAPI):
     logger.info("Database initialized")
     
     # Initialize RabbitMQ consumer
-    consumer = ExecutionResultConsumer()
+    consumer = CalderaExecutionConsumer()
     try:
         await consumer.start_consuming()
         logger.info("RabbitMQ consumer started successfully")

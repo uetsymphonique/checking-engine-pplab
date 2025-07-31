@@ -4,6 +4,9 @@ from sqlalchemy import select, update, delete
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
 from ..models.base import BaseModel as DBBaseModel
+from ..utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 ModelType = TypeVar("ModelType", bound=DBBaseModel)
 CreateSchemaType = TypeVar("CreateSchemaType", bound=BaseModel)

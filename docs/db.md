@@ -93,6 +93,7 @@ erDiagram
         integer retry_count
         integer max_retries
         jsonb execution_metadata
+        timestamp created_at
     }
     
     detection_results {
@@ -104,8 +105,15 @@ erDiagram
         timestamp result_timestamp
         string result_source
         jsonb metadata
+        timestamp created_at
     }
 ```
+
+### Database Architecture Overview
+
+![Database Schema](images/db_schema.png)
+
+*The database schema supports the Purple Team workflow by storing Caldera operations, execution results, and detection outcomes across multiple platforms.*
 
 ## Table Definitions
 

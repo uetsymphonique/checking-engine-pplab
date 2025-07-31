@@ -3,7 +3,8 @@ from fastapi import APIRouter
 from .health import router as health_router
 from .operations import router as operations_router
 from .executions import router as executions_router
-from .detections import router as detections_router
+from .detection_executions import router as detection_executions_router
+from .detection_results import router as detection_results_router
 
 # Main API Router
 router = APIRouter()
@@ -12,4 +13,5 @@ router = APIRouter()
 router.include_router(health_router)
 router.include_router(operations_router)
 router.include_router(executions_router)
-router.include_router(detections_router) 
+router.include_router(detection_executions_router)
+router.include_router(detection_results_router) 

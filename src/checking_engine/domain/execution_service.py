@@ -54,7 +54,7 @@ class ExecutionService:
             )
             
             execution_result = await self.repo.create(self.db, create_data)
-            logger.info(f"Created execution result: link_id={execution_result.link_id}, operation_id={execution_result.operation_id}")
+            logger.debug(f"Created execution result: link_id={execution_result.link_id}, operation_id={execution_result.operation_id}")
             
             return execution_result
             

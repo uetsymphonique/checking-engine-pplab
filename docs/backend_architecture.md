@@ -32,12 +32,24 @@ expand/checking-engine/
 │       │   │   ├── health.py       # Health check endpoints
 │       │   │   ├── operations.py   # Operations endpoints
 │       │   │   ├── executions.py   # Executions endpoints
-│       │   │   ├── detections.py   # Detections endpoints
+│       │   │   ├── detection_executions.py  # Detection execution endpoints
+│       │   │   ├── detection_results.py     # Detection result endpoints
 │       │   │   └── router.py       # Main API router
 │       │   └── deps.py             # API dependencies
-│       ├── core/                   # Core application logic
-│       ├── database/               # Database layer
+│       ├── application/            # Application layer (use case orchestration)
+│       │   └── message_service.py  # Message processing orchestration
+│       ├── domain/                 # Domain layer (business logic)
+│       │   ├── operation_service.py # Operation business logic
+│       │   ├── execution_service.py # Execution business logic
+│       │   └── detection_service.py # Detection business logic
+│       ├── database/               # Database infrastructure
 │       │   └── connection.py       # Database connection management
+│       ├── mq/                     # Message queue infrastructure
+│       │   ├── connection.py       # RabbitMQ connection utilities
+│       │   ├── consumers/          # Message consumers
+│       │   │   └── caldera_execution_consumer.py
+│       │   └── publishers/         # Message publishers
+│       │       └── task_dispatcher.py
 │       ├── models/                 # SQLAlchemy ORM models
 │       │   ├── base.py             # Base model class
 │       │   ├── operation.py        # Operation model
@@ -52,8 +64,8 @@ expand/checking-engine/
 │       │   ├── operation.py        # Operation schemas
 │       │   ├── execution.py        # Execution schemas
 │       │   └── detection.py        # Detection schemas
-│       ├── services/               # Business logic layer
 │       ├── utils/                  # Utility functions
+│       │   └── logging.py          # Centralized logging
 │       ├── config.py               # Application configuration
 │       └── main.py                 # FastAPI application entry point
 ├── .env                           # Environment variables
@@ -80,21 +92,27 @@ The backend follows clean architecture patterns with clear separation of concern
 ┌─────────────────────────────────────────────────────────────┐
 │                    Business Logic Layer                     │
 │  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐│
-│  │   Services      │ │   Repositories  │ │    Schemas      ││
-│  │   (Future)      │ │   Data Access   │ │   Validation    ││
+│  │   Domain        │ │   Repositories  │ │    Schemas      ││
+│  │   Services      │ │   Data Access   │ │   Validation    ││
 │  └─────────────────┘ └─────────────────┘ └─────────────────┘│
 └─────────────────────────────────────────────────────────────┘
                                │
 ┌─────────────────────────────────────────────────────────────┐
-│                     Data Layer                              │
+│                 Infrastructure Layer                        │
 │  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐│
-│  │   ORM Models    │ │   Database      │ │   RabbitMQ      ││
-│  │   SQLAlchemy    │ │   PostgreSQL    │ │   (Future)      ││
+│  │   Database      │ │   Message Queue │ │   External      ││
+│  │   PostgreSQL    │ │   RabbitMQ      │ │   Integrations  ││
 │  └─────────────────┘ └─────────────────┘ └─────────────────┘│
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 2. Layer Responsibilities
+### 2. System Architecture Overview
+
+![Checking Engine Architecture](images/checking-engine.png)
+
+*The Checking Engine integrates Caldera execution results with Blue Team detection capabilities through distributed infrastructure components.*
+
+### 3. Layer Responsibilities
 
 #### **API Layer (`api/`)**
 - **Purpose**: Handle HTTP requests and responses
@@ -110,30 +128,33 @@ The backend follows clean architecture patterns with clear separation of concern
 - API versioning support
 - Dependency injection for database sessions
 
-#### **Business Logic Layer (`repositories/`, `services/`, `schemas/`)**
-
-**Repositories (`repositories/`)**:
-- **Purpose**: Data access abstraction layer
-- **Pattern**: Repository pattern for database operations
+#### **Application Layer (`application/`)**
+- **Purpose**: Use case orchestration and cross-cutting concerns
 - **Components**:
-  - `base.py`: Generic CRUD operations
-  - `*_repo.py`: Specialized repository classes
+  - `message_service.py`: Processes incoming Caldera messages and coordinates domain services
 
-**Schemas (`schemas/`)**:
-- **Purpose**: Data validation and serialization
+#### **Domain Layer (`domain/`)**
+- **Purpose**: Business logic and core domain services
 - **Components**:
-  - Request/response models using Pydantic
-  - Data validation rules
-  - Type safety and documentation
+  - `operation_service.py`: Operation management and business rules
+  - `execution_service.py`: Execution result processing logic
+  - `detection_service.py`: Detection task creation and management
 
-**Services (`services/`)**:
-- **Purpose**: Business logic and complex operations (Future implementation)
-- **Planned Components**:
-  - Detection orchestration
-  - Message processing
-  - Purple Team workflow management
+#### **Infrastructure Layer (Distributed)**
 
-#### **Data Layer (`models/`, `database/`)**
+**Database Infrastructure (`database/`)**:
+- **Purpose**: Database connection and session management
+- **Components**:
+  - `connection.py`: Async database connections and session lifecycle
+
+**Message Queue Infrastructure (`mq/`)**:
+- **Purpose**: RabbitMQ integration for async messaging
+- **Components**:
+  - `connection.py`: RabbitMQ connection utilities for different user roles
+  - `consumers/`: Message consumers for processing incoming messages
+  - `publishers/`: Message publishers for dispatching tasks
+
+#### **Data Layer (`models/`, `schemas/`, `repositories/`)**
 
 **Models (`models/`)**:
 - **Purpose**: Database schema definition
@@ -142,14 +163,21 @@ The backend follows clean architecture patterns with clear separation of concern
   - Table relationships
   - Database constraints
 
-**Database (`database/`)**:
-- **Purpose**: Database connection and session management
+**Schemas (`schemas/`)**:
+- **Purpose**: Data validation and serialization
 - **Components**:
-  - Async database connections
-  - Session lifecycle management
-  - Health checks
+  - Request/response models using Pydantic
+  - Data validation rules
+  - Type safety and documentation
 
-### 3. Data Flow Architecture
+**Repositories (`repositories/`)**:
+- **Purpose**: Data access abstraction layer
+- **Pattern**: Repository pattern for database operations
+- **Components**:
+  - `base.py`: Generic CRUD operations
+  - `*_repo.py`: Specialized repository classes
+
+### 4. Data Flow Architecture
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
@@ -180,78 +208,75 @@ The backend follows clean architecture patterns with clear separation of concern
 
 ## Database Design
 
-### 4. Entity Relationship Diagram
+### 5. Entity Relationship Diagram
 
-```
-┌─────────────────┐
-│   operations    │
-│                 │
-│ id (PK)         │
-│ name            │
-│ operation_id    │◄─────────┐
-│ operation_start │          │
-│ created_at      │          │
-│ updated_at      │          │
-│ metadata        │          │
-└─────────────────┘          │
-         │                   │
-         │ 1:N               │
-         ▼                   │
-┌─────────────────┐          │
-│execution_results│          │
-│                 │          │
-│ id (PK)         │          │
-│ operation_id    │──────────┘
-│ agent_host      │
-│ agent_paw       │
-│ link_id         │
-│ command         │
-│ status          │
-│ result_data     │
-│ created_at      │
-│ raw_message     │
-└─────────────────┘
-         │
-         │ 1:N
-         ▼
-┌─────────────────┐          ┌─────────────────┐
-│detection_exec.  │          │   operations    │
-│                 │          │                 │
-│ id (PK)         │          │ id (PK)         │
-│ exec_result_id  │          │ operation_id    │◄┐
-│ operation_id    │──────────┘                 │ │
-│ detection_type  │                            │ │
-│ detection_plat. │                            │ │
-│ detection_conf. │                            │ │
-│ status          │                            │ │
-│ started_at      │                            │ │
-│ completed_at    │                            │ │
-│ retry_count     │                            │ │
-│ created_at      │                            │ │
-└─────────────────┘                            │ │
-         │                                     │ │
-         │ 1:N                                 │ │
-         ▼                                     │ │
-┌─────────────────┐                            │ │
-│detection_results│                            │ │
-│                 │                            │ │
-│ id (PK)         │                            │ │
-│ detection_ex_id │                            │ │
-│ detected        │                            │ │
-│ raw_response    │                            │ │
-│ parsed_results  │                            │ │
-│ result_timestamp│                            │ │
-│ result_source   │                            │ │
-│ metadata        │                            │ │
-│ created_at      │                            │ │
-└─────────────────┘                            │ │
-                                               │ │
-           ┌───────────────────────────────────┘ │
-           │                                     │
-           └─────────────────────────────────────┘
+```mermaid
+erDiagram
+    operations ||--o{ execution_results : has
+    operations ||--o{ detection_executions : belongs_to
+    execution_results ||--o{ detection_executions : triggers
+    detection_executions ||--o{ detection_results : produces
+    
+    operations {
+        uuid id PK
+        string name
+        uuid operation_id
+        timestamp operation_start
+        timestamp created_at
+        timestamp updated_at
+        jsonb metadata
+    }
+    
+    execution_results {
+        uuid id PK
+        uuid operation_id FK
+        string agent_host
+        string agent_paw
+        uuid link_id
+        string command
+        integer pid
+        integer status
+        jsonb result_data
+        timestamp agent_reported_time
+        string link_state
+        timestamp created_at
+        jsonb raw_message
+    }
+    
+    detection_executions {
+        uuid id PK
+        uuid execution_result_id FK
+        uuid operation_id FK
+        string detection_type
+        string detection_platform
+        jsonb detection_config
+        string status
+        timestamp started_at
+        timestamp completed_at
+        integer retry_count
+        integer max_retries
+        jsonb execution_metadata
+        timestamp created_at
+    }
+    
+    detection_results {
+        uuid id PK
+        uuid detection_execution_id FK
+        boolean detected
+        jsonb raw_response
+        jsonb parsed_results
+        timestamp result_timestamp
+        string result_source
+        jsonb metadata
+        timestamp created_at
+    }
 ```
 
-### 5. Table Relationships
+![Database Schema](images/db_schema.png)
+
+*The database schema supports the Purple Team workflow by storing Caldera operations, execution results, and detection outcomes across multiple platforms.*
+
+### 6. Table Relationships
 
 **Operations (1:N) Execution Results**:
 - One operation can have multiple execution results
@@ -271,7 +296,7 @@ The backend follows clean architecture patterns with clear separation of concern
 
 ## API Design
 
-### 6. RESTful API Structure
+### 7. RESTful API Structure
 
 **Base URL**: `http://localhost:1337/api/v1`
 
@@ -332,7 +357,7 @@ PUT    /detections/results/{id}               # Update detection result
 DELETE /detections/results/{id}               # Delete detection result
 ```
 
-### 7. Request/Response Patterns
+### 8. Request/Response Patterns
 
 #### **Standard Response Format**
 ```json
@@ -365,7 +390,7 @@ DELETE /detections/results/{id}               # Delete detection result
 
 ## Configuration Management
 
-### 8. Environment Variables
+### 9. Environment Variables
 
 The application uses Pydantic Settings for configuration management:
 
@@ -391,7 +416,7 @@ class Settings(BaseSettings):
     }
 ```
 
-### 9. Environment File (.env)
+### 10. Environment File (.env)
 ```env
 # Database Configuration
 DATABASE_URL=postgresql+asyncpg://db_caldera:password@localhost:5432/caldera_purple
@@ -401,16 +426,55 @@ APP_NAME=Checking Engine
 APP_VERSION=0.1.0
 DEBUG=true
 
-# RabbitMQ Configuration (Future)
 RABBITMQ_HOST=localhost
 RABBITMQ_PORT=5672
-RABBITMQ_USERNAME=checking_consumer
-RABBITMQ_PASSWORD=your_password
+RABBITMQ_VHOST=/caldera_checking
+RABBITMQ_MANAGEMENT_PORT=15672
+
+# User Credentials (update with actual passwords)
+RABBITMQ_ADMIN_USER=caldera_admin
+RABBITMQ_ADMIN_PASS=haha
+
+RABBITMQ_PUBLISHER_USER=caldera_publisher
+RABBITMQ_PUBLISHER_PASS=hihi
+
+RABBITMQ_CONSUMER_USER=checking_consumer
+RABBITMQ_CONSUMER_PASS=hehe
+
+RABBITMQ_WORKER_USER=checking_worker
+RABBITMQ_WORKER_PASS=huhu
+
+RABBITMQ_DISPATCHER_USER=checking_dispatcher
+RABBITMQ_DISPATCHER_PASS=hoho
+
+RABBITMQ_RESULT_CONSUMER_USER=checking_result_consumer
+RABBITMQ_RESULT_CONSUMER_PASS=hichic
+
+RABBITMQ_MONITOR_USER=monitor_user
+RABBITMQ_MONITOR_PASS=huhhuh
+
+# Exchange and Queue Names
+RABBITMQ_EXCHANGE=caldera.checking.exchange
+RABBITMQ_INSTRUCTIONS_QUEUE=caldera.checking.instructions
+RABBITMQ_API_TASKS_QUEUE=caldera.checking.api.tasks
+RABBITMQ_AGENT_TASKS_QUEUE=caldera.checking.agent.tasks
+RABBITMQ_API_RESPONSES_QUEUE=caldera.checking.api.responses
+RABBITMQ_AGENT_RESPONSES_QUEUE=caldera.checking.agent.responses
+
+# Routing Keys
+ROUTING_KEY_EXECUTION_RESULT=caldera.execution.result
+ROUTING_KEY_API_TASK=checking.api.task
+ROUTING_KEY_AGENT_TASK=checking.agent.task
+ROUTING_KEY_API_RESPONSE=checking.api.response
+ROUTING_KEY_AGENT_RESPONSE=checking.agent.response
+
+# Logging
+LOG_LEVEL=INFO
 ```
 
 ## Technology Stack
 
-### 10. Core Technologies
+### 11. Core Technologies
 
 **Backend Framework**:
 - **FastAPI**: Modern, fast web framework for building APIs
@@ -422,35 +486,10 @@ RABBITMQ_PASSWORD=your_password
 - **SQLAlchemy**: ORM for database operations
 - **AsyncPG**: Async PostgreSQL driver
 
-**Message Queue** (Planned):
+**Message Queue**:
 - **RabbitMQ**: Message broker for async communication
 - **aio-pika**: Async Python client for RabbitMQ
 
 **Development Tools**:
 - **httpx**: HTTP client for testing
 - **pytest**: Testing framework (planned)
-
-## Testing Strategy
-
-### 11. Test Architecture
-
-**Test Types**:
-- **Unit Tests**: Individual component testing
-- **Integration Tests**: API endpoint testing
-- **End-to-End Tests**: Complete workflow testing
-
-**Test Structure**:
-```
-tests/
-├── test_operations_crud.py     # Operations API tests
-├── test_executions_crud.py     # Executions API tests
-├── test_detections_crud.py     # Detections API tests
-├── test_caldera_publisher.py   # RabbitMQ integration tests
-└── test_app.py                 # Basic application tests
-```
-
-**Test Coverage**:
-- ✅ **Operations**: 100% CRUD coverage
-- ✅ **Executions**: 100% CRUD + special methods
-- ✅ **Detections**: 100% CRUD + statistics
-- ✅ **Health Checks**: 100% coverage

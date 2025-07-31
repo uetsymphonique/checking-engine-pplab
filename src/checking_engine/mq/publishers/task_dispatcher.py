@@ -1,3 +1,11 @@
+"""
+Task Dispatcher for publishing detection tasks to worker queues.
+
+This publisher sends detection tasks to appropriate worker queues (API or Agent)
+based on the detection type. It handles the routing logic and message publishing
+for the Purple Team checking engine workflow.
+"""
+
 import asyncio
 import aio_pika
 import json
@@ -8,13 +16,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from checking_engine.config import settings
 from checking_engine.mq.connection import get_rabbitmq_connection
 from checking_engine.models.detection import DetectionExecution
-from checking_engine.schemas.detection import DetectionStatus
-from checking_engine.utils.logging import get_logger, log_mq_operation
+from checking_engine.schemas.detection import DetectionStatus, DetectionType
+from checking_engine.utils.logging import get_logger, setup_logging
 
 logger = get_logger(__name__)
+setup_logging(log_level=settings.log_level)
 
-class TaskDispatcherService:
-    """Service for dispatching detection tasks to appropriate worker queues"""
+
+class TaskDispatcher:
+    """Publisher for dispatching detection tasks to appropriate worker queues"""
     
     def __init__(self, db_session: Optional[AsyncSession] = None):
         self.db = db_session
@@ -24,33 +34,30 @@ class TaskDispatcherService:
         self._initialized = False
     
     async def initialize(self):
-        """Initialize RabbitMQ connection and exchange for dispatcher role"""
-        if self._initialized:
-            return
-        
+        """Initialize connection and exchange"""
         try:
-            logger.info("Initializing TaskDispatcherService")
+            logger.debug("Initializing TaskDispatcher")
             
-            # Connect to RabbitMQ with dispatcher role
-            self.connection = await get_rabbitmq_connection("dispatcher")
-            logger.info("Connected to RabbitMQ as dispatcher")
+            # Connect to RabbitMQ as dispatcher
+            self.connection = await get_rabbitmq_connection('dispatcher')
+            logger.debug("Connected to RabbitMQ as dispatcher")
             
             # Create channel
             self.channel = await self.connection.channel()
-            logger.info("Created RabbitMQ channel for dispatcher")
+            logger.debug("Created RabbitMQ channel for dispatcher")
             
             # Get the main exchange
             self.exchange = await self.channel.get_exchange(settings.rabbitmq_exchange)
-            logger.info(f"Got exchange: {settings.rabbitmq_exchange}")
+            logger.debug(f"Got exchange: {settings.rabbitmq_exchange}")
             
             # Test queue access (just verify we can see them)
             await self._verify_queue_access()
             
             self._initialized = True
-            logger.info("TaskDispatcherService initialized successfully")
+            logger.debug("TaskDispatcher initialized successfully")
             
         except Exception as e:
-            logger.error(f"Failed to initialize TaskDispatcherService: {e}")
+            logger.error(f"Failed to initialize TaskDispatcher: {e}")
             await self._cleanup()
             raise
     
@@ -61,36 +68,36 @@ class TaskDispatcherService:
             # So we just verify the queues exist by attempting to get them
             # This might fail due to permissions, which is expected
             
-            logger.info("Verifying task queue accessibility...")
+            logger.debug("Verifying task queue accessibility...")
             
             # Log the queues we plan to dispatch to
             api_queue_name = settings.rabbitmq_api_tasks_queue
             agent_queue_name = settings.rabbitmq_agent_tasks_queue
             
-            logger.info(f"Target API tasks queue: {api_queue_name}")
-            logger.info(f"Target Agent tasks queue: {agent_queue_name}")
+            logger.debug(f"Target API tasks queue: {api_queue_name}")
+            logger.debug(f"Target Agent tasks queue: {agent_queue_name}")
             
             # Log routing keys we will use
             api_routing_key = settings.routing_key_api_task
             agent_routing_key = settings.routing_key_agent_task
             
-            logger.info(f"API task routing key: {api_routing_key}")
-            logger.info(f"Agent task routing key: {agent_routing_key}")
+            logger.debug(f"API task routing key: {api_routing_key}")
+            logger.debug(f"Agent task routing key: {agent_routing_key}")
             
-            logger.info("Queue verification completed (dispatcher has publish-only access)")
+            logger.debug("Queue verification completed (dispatcher has publish-only access)")
             
         except Exception as e:
-            logger.warning(f"Queue verification had issues (expected for dispatcher role): {e}")
+            logger.warning(f"Queue verification failed (expected for dispatcher role): {e}")
     
     def determine_target_queue_info(self, detection_type: str) -> Dict[str, str]:
         """
-        Business logic: Determine target queue and routing key based on detection type
+        Determine target queue and routing key based on detection type
         
         Args:
-            detection_type: The type of detection as string from database ('api', 'windows', 'linux', 'darwin')
+            detection_type: The type of detection ('api', 'windows', 'linux', 'darwin')
             
         Returns:
-            Dict with 'queue_name' and 'routing_key'
+            Dict containing queue_name, routing_key, and worker_type
         """
         # Convert to lowercase for consistent comparison
         detection_type_lower = detection_type.lower()
@@ -132,7 +139,7 @@ class TaskDispatcherService:
                 'tasks_by_type': {}
             }
         
-        logger.info(f"Starting dispatch of {len(detection_executions)} detection tasks")
+        logger.debug(f"Starting dispatch of {len(detection_executions)} detection tasks")
         
         dispatched_count = 0
         failed_count = 0
@@ -155,7 +162,7 @@ class TaskDispatcherService:
                     "operation_id": str(detection.operation_id) if detection.operation_id else None,
                     "detection_type": detection.detection_type,
                     "detection_platform": detection.detection_platform,
-                    "detection_config": detection.detection_config,  # Use detection_config instead of detection_query
+                    "detection_config": detection.detection_config,
                     "created_at": detection.created_at.isoformat() if detection.created_at else None,
                     "metadata": {
                         "priority": "normal",
@@ -175,9 +182,9 @@ class TaskDispatcherService:
                 
                 await self.exchange.publish(message, routing_key=queue_info['routing_key'])
                 
-                logger.info(f"Dispatched detection {detection.id} "
-                           f"(type={detection.detection_type}, platform={detection.detection_platform}) "
-                           f"to {queue_info['queue_name']} with routing key {queue_info['routing_key']}")
+                logger.debug(f"Dispatched detection {detection.id} "
+                            f"(type={detection.detection_type}, platform={detection.detection_platform}) "
+                            f"to {queue_info['queue_name']} with routing key {queue_info['routing_key']}")
                 
                 # Update detection status to 'dispatched' (tasks have been dispatched to workers)
                 if self.db:
@@ -187,109 +194,77 @@ class TaskDispatcherService:
                 tasks_by_type[worker_type] += 1
                 dispatched_count += 1
                 
-                # Log MQ operation (simulated for now)
-                log_mq_operation(
-                    logger, "task_dispatch_planned",
-                    queue_info['queue_name'],
-                    message_id=None,
-                    detection_id=str(detection.id),
-                    detection_type=detection.detection_type,  # Already a string, no need for .value
-                    routing_key=queue_info['routing_key']
-                )
+                # Log MQ operation
+                logger.debug(f"Dispatched detection {detection.id} to {queue_info['queue_name']}")
                 
             except Exception as e:
                 logger.error(f"Failed to dispatch detection {detection.id}: {e}")
                 failed_count += 1
         
-        result = {
-            'status': 'success' if failed_count == 0 else 'partial_success',
+        logger.debug(f"Dispatch completed: {dispatched_count} dispatched, {failed_count} failed")
+        logger.debug(f"Tasks by type: {tasks_by_type}")
+        
+        return {
+            'status': 'success' if failed_count == 0 else 'partial',
             'dispatched_count': dispatched_count,
             'failed_count': failed_count,
             'tasks_by_type': tasks_by_type
         }
+    
+    async def _cleanup(self):
+        """Clean up connections"""
+        if self.channel:
+            await self.channel.close()
+            logger.debug("Closed dispatcher RabbitMQ channel")
+            self.channel = None
         
-        logger.info(f"Dispatch completed: {dispatched_count} dispatched, {failed_count} failed")
-        logger.info(f"Tasks by type: {tasks_by_type}")
+        if self.connection:
+            await self.connection.close()
+            logger.debug("Closed dispatcher RabbitMQ connection")
+            self.connection = None
         
-        return result
+        self._initialized = False
     
     async def close(self):
         """Close TaskDispatcher connections"""
         await self._cleanup()
     
-    async def test_connection(self) -> bool:
-        """Test dispatcher connection and return success status"""
+    async def test_connection(self):
+        """Test dispatcher connection and functionality"""
         try:
             await self.initialize()
-            logger.info("TaskDispatcherService connection test successful")
-            return True
-        except Exception as e:
-            logger.error(f"TaskDispatcherService connection test failed: {e}")
-            return False
-    
-    async def close(self):
-        """Close dispatcher connections"""
-        await self._cleanup()
-    
-    async def _cleanup(self):
-        """Clean up RabbitMQ resources"""
-        try:
-            if self.channel:
-                await self.channel.close()
-                logger.info("Closed dispatcher RabbitMQ channel")
-            
-            if self.connection:
-                await self.connection.close()
-                logger.info("Closed dispatcher RabbitMQ connection")
-                
-            self._initialized = False
-                
-        except Exception as e:
-            logger.error(f"Error during dispatcher cleanup: {e}")
-
-async def test_task_dispatcher():
-    """Test TaskDispatcherService connection and queue logic"""
-    dispatcher = TaskDispatcherService()
-    
-    try:
-        # Test connection
-        success = await dispatcher.test_connection()
-        if success:
-            logger.info("✅ TaskDispatcher connection test PASSED")
+            logger.debug("TaskDispatcher connection test successful")
             
             # Test queue determination logic
-            logger.info("\n🧪 Testing queue determination logic:")
+            test_cases = [DetectionType.API, DetectionType.WINDOWS, DetectionType.LINUX, DetectionType.DARWIN]
             
-            test_cases = [
-                DetectionType.API,
-                DetectionType.WINDOWS,
-                DetectionType.LINUX,
-                DetectionType.DARWIN
-            ]
+            if await self._test_queue_determination(test_cases):
+                logger.debug("✅ TaskDispatcher connection test PASSED")
+                return True
+            else:
+                logger.error("❌ TaskDispatcher connection test FAILED")
+                return False
+                
+        except Exception as e:
+            logger.error(f"TaskDispatcher connection test failed: {e}")
+            return False
+        finally:
+            await self._cleanup()
+    
+    async def _test_queue_determination(self, test_cases: List[DetectionType]) -> bool:
+        """Test queue determination logic"""
+        try:
+            logger.debug("\n🧪 Testing queue determination logic:")
             
+            dispatcher = TaskDispatcher()
             for detection_type in test_cases:
                 queue_info = dispatcher.determine_target_queue_info(detection_type)
-                logger.info(f"  {detection_type.value} → {queue_info['worker_type']} worker "
-                           f"(queue: {queue_info['queue_name']}, "
-                           f"routing_key: {queue_info['routing_key']})")
+                logger.debug(f"  {detection_type.value} → {queue_info['worker_type']} worker "
+                            f"(queue: {queue_info['queue_name']}, "
+                            f"routing_key: {queue_info['routing_key']})")
             
-            logger.info("✅ Queue determination logic test PASSED")
-        else:
-            logger.error("❌ TaskDispatcher connection test FAILED")
-            
-    except Exception as e:
-        logger.error(f"❌ TaskDispatcher test failed: {e}")
-        import traceback
-        traceback.print_exc()
-    finally:
-        await dispatcher.close()
-
-if __name__ == "__main__":
-    import sys
-    import os
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
-    
-    from checking_engine.utils.logging import setup_logging
-    setup_logging(log_level="INFO")
-    
-    asyncio.run(test_task_dispatcher())
+            logger.debug("✅ Queue determination logic test PASSED")
+            return True
+        except Exception as e:
+            logger.error(f"Queue determination test failed: {e}")
+            return False

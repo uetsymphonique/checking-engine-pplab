@@ -3,6 +3,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from checking_engine.api.deps import get_db
 from checking_engine.config import settings
+from checking_engine.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/health", tags=["health"])
 
@@ -23,12 +26,14 @@ async def database_health_check(db: AsyncSession = Depends(get_db)):
         result = await db.execute(text("SELECT 1 as test"))
         result.fetchone()
         
+        logger.debug("Database health check successful")
         return {
             "status": "healthy",
             "database": "connected",
             "message": "Database connection successful"
         }
     except Exception as e:
+        logger.error(f"Database health check failed: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Database connection failed: {str(e)}"

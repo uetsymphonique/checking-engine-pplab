@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy import text
 
 from checking_engine.config import settings
-from checking_engine.utils.logging import get_logger, setup_logging
+from checking_engine.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -120,5 +120,6 @@ async def test_connection() -> None:
         await db.close()
 
 if __name__ == "__main__":
-    setup_logging(log_level="DEBUG")
+            # Logging is initialized in main.py
+        # setup_logging(log_level="DEBUG")
     asyncio.run(test_connection())

@@ -3,10 +3,10 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from checking_engine.services.operation_service import OperationService
-from checking_engine.services.execution_service import ExecutionService
-from checking_engine.services.detection_service import DetectionService
-from checking_engine.services.task_dispatcher_service import TaskDispatcherService
+from checking_engine.domain.operation_service import OperationService
+from checking_engine.domain.execution_service import ExecutionService
+from checking_engine.domain.detection_service import DetectionService
+from checking_engine.mq.publishers import TaskDispatcher
 from checking_engine.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -62,7 +62,7 @@ class MessageProcessingService:
                     logger.info(f"Execution SUCCESS detected - dispatching {len(detection_executions)} detection tasks")
                     
                     # Initialize task dispatcher with database session
-                    task_dispatcher = TaskDispatcherService(db_session=self.db)
+                    task_dispatcher = TaskDispatcher(db_session=self.db)
                     
                     # Dispatch tasks immediately after DB commit
                     dispatch_result = await task_dispatcher.dispatch_detection_tasks(detection_executions)

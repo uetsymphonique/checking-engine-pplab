@@ -1,9 +1,9 @@
 import aio_pika
-import logging
 from typing import Optional
+from checking_engine.utils.logging import get_logger
 from checking_engine.config import settings
 
-logger = logging.getLogger("checking_engine.mq.connection")
+logger = get_logger(__name__)
 
 ROLE_USER_PASS = {
     "admin": (settings.rabbitmq_admin_user, settings.rabbitmq_admin_pass),
@@ -45,15 +45,16 @@ async def test_connect_all_roles():
     import asyncio
     for role in ROLE_USER_PASS:
         try:
-            logger.info(f"[TEST] Connecting as role: {role}")
+            logger.debug(f"[TEST] Connecting as role: {role}")
             conn = await get_rabbitmq_connection(role)
             await conn.close()
-            logger.info(f"[TEST] Connection successful for role: {role}")
+            logger.debug(f"[TEST] Connection successful for role: {role}")
         except Exception as e:
             logger.error(f"[TEST] Connection FAILED for role: {role} - {e}")
-    logger.info("[TEST] All role connection tests complete.")
+    logger.debug("[TEST] All role connection tests complete.")
 
 if __name__ == "__main__":
     import asyncio
-    logging.basicConfig(level=logging.INFO)
+    # Logging is initialized in main.py
+    # setup_logging()
     asyncio.run(test_connect_all_roles())

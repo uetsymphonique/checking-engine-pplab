@@ -11,6 +11,9 @@ from ...schemas.operation import (
     OperationResponse, 
     OperationListResponse
 )
+from ...utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/operations", tags=["operations"])
 

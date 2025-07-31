@@ -82,13 +82,13 @@ class DetectionService:
                     detection_execution = await self.execution_repo.create(self.db, create_data)
                     created_detections.append(detection_execution)
                     
-                    logger.info(f"Created detection execution: type={detection_type}, platform={detection_config.get('detection_platform')}")
+                    logger.debug(f"Created detection execution: type={detection_type}, platform={detection_config.get('detection_platform')}")
                     
                 except Exception as e:
                     logger.error(f"Error creating detection execution from config {detection_config}: {e}")
                     continue
             
-            logger.info(f"Created {len(created_detections)} detection executions for execution_result_id={execution_result_id}")
+            logger.debug(f"Created {len(created_detections)} detection executions for execution_result_id={execution_result_id}")
             return created_detections
             
         except Exception as e:

@@ -60,8 +60,11 @@ class Settings(BaseSettings):
     routing_key_api_response: str = Field(default="checking.api.response", env="ROUTING_KEY_API_RESPONSE")
     routing_key_agent_response: str = Field(default="checking.agent.response", env="ROUTING_KEY_AGENT_RESPONSE")
     
-    # Logging
+    # Logging Configuration
     log_level: str = Field(default="INFO", env="LOG_LEVEL")
+    log_file: Optional[str] = Field(default=None, env="LOG_FILE")
+    log_json_format: bool = Field(default=False, env="LOG_JSON_FORMAT")
+    log_console_output: bool = Field(default=True, env="LOG_CONSOLE_OUTPUT")
     
     model_config = {
         "env_file": ".env",
@@ -70,4 +73,5 @@ class Settings(BaseSettings):
     }
 
 # Global settings instance
-settings = Settings() 
+settings = Settings()
+print(f"log_level: {settings.log_level}") 

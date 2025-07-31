@@ -202,83 +202,8 @@ def log_with_context(
     
     logger.handle(record)
 
-# Convenience functions for common logging patterns
-def log_operation_start(logger: logging.Logger, operation_id: str, **kwargs) -> None:
-    """Log operation start with context"""
-    log_with_context(
-        logger, "INFO", "Operation started",
-        extra_fields={"operation_id": operation_id, "event": "operation_start"},
-        **kwargs
-    )
-
-def log_operation_end(logger: logging.Logger, operation_id: str, duration_ms: float, **kwargs) -> None:
-    """Log operation end with duration"""
-    log_with_context(
-        logger, "INFO", "Operation completed",
-        extra_fields={
-            "operation_id": operation_id,
-            "event": "operation_end",
-            "duration_ms": duration_ms
-        },
-        **kwargs
-    )
-
-def log_detection_execution(
-    logger: logging.Logger,
-    detection_type: str,
-    detection_platform: str,
-    execution_id: str,
-    **kwargs
-) -> None:
-    """Log detection execution with context"""
-    log_with_context(
-        logger, "INFO", "Detection execution started",
-        extra_fields={
-            "detection_type": detection_type,
-            "detection_platform": detection_platform,
-            "execution_id": execution_id,
-            "event": "detection_execution"
-        },
-        **kwargs
-    )
-
-def log_database_operation(
-    logger: logging.Logger,
-    operation: str,
-    table: str,
-    record_id: Optional[str] = None,
-    **kwargs
-) -> None:
-    """Log database operation with context"""
-    log_with_context(
-        logger, "DEBUG", f"Database {operation}",
-        extra_fields={
-            "db_operation": operation,
-            "table": table,
-            "record_id": record_id,
-            "event": "database_operation"
-        },
-        **kwargs
-    )
-
-def log_mq_operation(
-    logger: logging.Logger,
-    operation: str,
-    queue: str,
-    message_id: Optional[str] = None,
-    **kwargs
-) -> None:
-    """Log message queue operation with context"""
-    log_with_context(
-        logger, "DEBUG", f"MQ {operation}",
-        extra_fields={
-            "mq_operation": operation,
-            "queue": queue,
-            "message_id": message_id,
-            "event": "mq_operation"
-        },
-        **kwargs
-    )
+# Note: Removed convenience functions to avoid hard-coded log levels
+# Use logger.debug(), logger.info(), etc. directly with proper log levels
 
 # Context manager for correlation ID
 class CorrelationContext:
@@ -299,5 +224,5 @@ class CorrelationContext:
         else:
             clear_correlation_id()
 
-# Initialize default logging
-setup_logging() 
+# Note: Logging is now initialized in main.py with config settings
+# setup_logging() 

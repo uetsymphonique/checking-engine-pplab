@@ -45,7 +45,7 @@ class OperationService:
             )
             
             operation = await self.repo.create(self.db, create_data)
-            logger.info(f"Created new operation: {operation.name} ({operation.operation_id})")
+            logger.debug(f"Created new operation: {operation.name} ({operation.operation_id})")
             
             return operation
             
