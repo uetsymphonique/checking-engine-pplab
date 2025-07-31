@@ -30,7 +30,7 @@ class DetectionExecution(BaseModel):
     # Constraints
     __table_args__ = (
         CheckConstraint("detection_type IN ('api', 'windows', 'linux', 'darwin')", name='chk_detection_type'),
-        CheckConstraint("status IN ('pending', 'running', 'completed', 'failed', 'cancelled')", name='chk_status'),
+        CheckConstraint("status IN ('pending', 'dispatched', 'running', 'completed', 'failed', 'cancelled')", name='chk_status'),
         CheckConstraint("retry_count >= 0 AND retry_count <= max_retries", name='chk_retry_count'),
     )
     

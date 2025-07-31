@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS detection_executions (
     detection_type VARCHAR(50) NOT NULL,  -- 'api', 'windows', 'linux', 'darwin'
     detection_platform VARCHAR(50) NOT NULL,  -- 'cym', 'ajant', 'psh', 'pwsh', 'sh'
     detection_config JSONB NOT NULL,  -- Platform-specific configuration
-    status VARCHAR(50) DEFAULT 'pending',  -- pending, running, completed, failed, cancelled
+    status VARCHAR(50) DEFAULT 'pending',  -- pending, dispatched, running, completed, failed, cancelled
     started_at TIMESTAMPTZ DEFAULT NOW(),
     completed_at TIMESTAMPTZ,
     retry_count INTEGER DEFAULT 0,
@@ -99,7 +99,7 @@ CHECK (detection_type IN ('api', 'windows', 'linux', 'darwin'));
 
 ALTER TABLE detection_executions 
 ADD CONSTRAINT chk_status 
-CHECK (status IN ('pending', 'running', 'completed', 'failed', 'cancelled'));
+CHECK (status IN ('pending', 'dispatched', 'running', 'completed', 'failed', 'cancelled'));
 
 ALTER TABLE detection_executions 
 ADD CONSTRAINT chk_retry_count 

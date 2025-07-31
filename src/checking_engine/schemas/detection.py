@@ -16,6 +16,7 @@ class DetectionType(str, Enum):
 class DetectionStatus(str, Enum):
     """Enum for detection execution status"""
     PENDING = "pending"
+    DISPATCHED = "dispatched"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
