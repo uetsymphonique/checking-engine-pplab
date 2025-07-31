@@ -108,9 +108,115 @@ The backend follows clean architecture patterns with clear separation of concern
 
 ### 2. System Architecture Overview
 
-![Checking Engine Architecture](images/checking-engine.png)
+```mermaid
+graph TB
+    subgraph "RABBITMQ MESSAGE BROKER"
+        IQ[caldera.checking.instructions]
+        ATQ[caldera.checking.api.tasks]
+        GTQ[caldera.checking.agent.tasks]
+        ARQ[caldera.checking.api.responses]
+        GRQ[caldera.checking.agent.responses]
+    end
 
-*The Checking Engine integrates Caldera execution results with Blue Team detection capabilities through distributed infrastructure components.*
+    subgraph "CHECKING ENGINE BACKEND"
+        subgraph "Message Consumers"
+            IC[Caldera Execution Consumer<br/>Processes Red Team results]
+            RC[Detection Result Consumer<br/>Processes detection outcomes]
+        end
+        
+        subgraph "Core Logic"
+            MP[Message Processor<br/>Orchestrates data flow]
+            DS[Detection Service<br/>Creates detection tasks]
+            TD[Task Dispatcher<br/>Routes tasks by type]
+            AS[Analytics Service<br/>Processes results & metrics]
+        end
+        
+        subgraph "API Server"
+            API[FastAPI Server<br/>Operations • Executions<br/>Detections • Results]
+            Health[Health Endpoints<br/>System monitoring]
+        end
+        
+        subgraph "Data Layer"
+            Repos[Repository Layer<br/>Data access patterns]
+            Models[SQLAlchemy Models<br/>4 core entities]
+            DB[(PostgreSQL<br/>checking_engine schema)]
+        end
+        
+        subgraph "Domain Services"
+            OS[Operation Service<br/>Red Team operations]
+            ES[Execution Service<br/>Command results]
+            DetS[Detection Service<br/>Blue Team tasks]
+        end
+    end
+
+    subgraph "DETECTION WORKERS"
+        APIWorker[API Detection Workers<br/>SIEM queries • EDR calls<br/>Splunk • CrowdStrike • Elastic]
+        AgentWorker[Agent Detection Workers<br/>OS commands • Log analysis<br/>Windows • Linux • macOS]
+    end
+
+    subgraph "EXTERNAL SYSTEMS"
+        Caldera[MITRE Caldera<br/>Red Team platform]
+        BlueSystems[Blue Team Systems<br/>SIEM • EDR • Logs]
+    end
+
+    %% External to Message Broker
+    Caldera --> IQ
+    
+    %% Message flow - Instructions
+    IQ --> IC
+    IC --> MP
+    MP --> OS
+    MP --> ES
+    MP --> DS
+    DS --> TD
+    TD --> ATQ
+    TD --> GTQ
+    
+    %% Workers consume tasks
+    ATQ --> APIWorker
+    GTQ --> AgentWorker
+    
+    %% Workers interact with Blue Team systems
+    APIWorker --> BlueSystems
+    AgentWorker --> BlueSystems
+    
+    %% Workers publish results
+    APIWorker --> ARQ
+    AgentWorker --> GRQ
+    
+    %% Results flow back
+    ARQ --> RC
+    GRQ --> RC
+    RC --> AS
+    
+    %% Data persistence
+    OS --> Repos
+    ES --> Repos
+    DetS --> Repos
+    AS --> Repos
+    Repos --> Models
+    Models --> DB
+    
+    %% API access to data
+    API --> Repos
+    Health --> DB
+    
+    %% Styling
+    classDef consumer fill:#e3f2fd,stroke:#1976d2
+    classDef logic fill:#e8f5e8,stroke:#388e3c
+    classDef api fill:#fff3e0,stroke:#f57c00
+    classDef data fill:#f3e5f5,stroke:#7b1fa2
+    classDef domain fill:#e1f5fe,stroke:#0277bd
+    classDef external fill:#fafafa,stroke:#616161
+
+    class IC,RC consumer
+    class MP,DS,TD,AS logic
+    class API,Health api
+    class Repos,Models,DB data
+    class OS,ES,DetS domain
+    class IQ,ATQ,GTQ,ARQ,GRQ,APIWorker,AgentWorker,Caldera,BlueSystems external
+```
+
 
 ### 3. Layer Responsibilities
 
@@ -271,10 +377,6 @@ erDiagram
         timestamp created_at
     }
 ```
-
-![Database Schema](images/db_schema.png)
-
-*The database schema supports the Purple Team workflow by storing Caldera operations, execution results, and detection outcomes across multiple platforms.*
 
 ### 6. Table Relationships
 
