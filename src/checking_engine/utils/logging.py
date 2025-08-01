@@ -82,7 +82,8 @@ def setup_logging(
     log_level: str = "INFO",
     log_file: Optional[str] = None,
     json_format: bool = False,  # Default to simple format
-    console_output: bool = True
+    console_output: bool = True,
+    hide_third_party: bool = True  # Suppress 3rd-party logs below WARNING
 ) -> None:
     """
     Setup logging configuration for the checking engine
@@ -101,6 +102,27 @@ def setup_logging(
     # Configure root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(getattr(logging, log_level.upper()))
+
+    # Optionally suppress verbose logs from third-party libraries
+    if hide_third_party:
+        class _ThirdPartyFilter(logging.Filter):
+            """Filter that blocks records from non-project loggers below WARNING level."""
+            def filter(self, record: logging.LogRecord) -> bool:
+                # Allow all records originating from our project namespace
+                if record.name.startswith("checking_engine"):
+                    return True
+                # Allow WARNING or higher from any logger
+                return record.levelno >= logging.WARNING
+        root_logger.addFilter(_ThirdPartyFilter())
+        # Additionally raise level of some noisy libraries explicitly
+        for noisy in (
+            "aio_pika",
+            "aiormq",
+            "fastapi",
+            "uvicorn",
+            "sqlalchemy",
+        ):
+            logging.getLogger(noisy).setLevel(logging.WARNING)
     
     # Clear existing handlers
     root_logger.handlers.clear()
