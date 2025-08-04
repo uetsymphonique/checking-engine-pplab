@@ -134,55 +134,55 @@ The backend follows clean architecture patterns with clear separation of concern
 
 ```mermaid
 graph TB
-    subgraph "RABBITMQ MESSAGE BROKER"
-        IQ[caldera.checking.instructions]
-        ATQ[caldera.checking.api.tasks]
-        GTQ[caldera.checking.agent.tasks]
-        ARQ[caldera.checking.api.responses]
-        GRQ[caldera.checking.agent.responses]
+    subgraph RABBITMQ["RABBITMQ MESSAGE BROKER"]
+        IQ["caldera.checking.instructions"]
+        ATQ["caldera.checking.api.tasks"]
+        GTQ["caldera.checking.agent.tasks"]
+        ARQ["caldera.checking.api.responses"]
+        GRQ["caldera.checking.agent.responses"]
     end
 
-    subgraph "CHECKING ENGINE BACKEND"
-        subgraph "Message Consumers"
-            IC[Caldera Execution Consumer<br/>Processes Red Team results]
-            WTC[Worker Task Consumer<br/>Processes detection tasks]
-            RC[Detection Result Consumer<br/>Processes detection outcomes]
+    subgraph BACKEND["CHECKING ENGINE BACKEND"]
+        subgraph CONSUMERS["Message Consumers"]
+            IC["Caldera Execution Consumer<br/>Processes Red Team results"]
+            WTC["Worker Task Consumer<br/>Processes detection tasks"]
+            RC["Detection Result Consumer<br/>Processes detection outcomes"]
         end
         
-        subgraph "Core Logic"
-            MP[Message Processor<br/>Orchestrates data flow]
-            DS[Detection Service<br/>Creates detection tasks]
-            TD[Task Dispatcher<br/>Routes tasks by type]
-            RS[Result Service<br/>Processes detection results]
+        subgraph LOGIC["Core Logic"]
+            MP["Message Processor<br/>Orchestrates data flow"]
+            DS["Detection Service<br/>Creates detection tasks"]
+            TD["Task Dispatcher<br/>Routes tasks by type"]
+            RS["Result Service<br/>Processes detection results"]
         end
         
-        subgraph "API Server"
-            API[FastAPI Server<br/>Operations • Executions<br/>Detections • Results]
-            Health[Health Endpoints<br/>System monitoring]
+        subgraph API_SERVER["API Server"]
+            API["FastAPI Server<br/>Operations • Executions<br/>Detections • Results"]
+            Health["Health Endpoints<br/>System monitoring"]
         end
         
-        subgraph "Data Layer"
-            Repos[Repository Layer<br/>Data access patterns]
-            Models[SQLAlchemy Models<br/>4 core entities]
-            DB[(PostgreSQL<br/>checking_engine schema)]
+        subgraph DATA_LAYER["Data Layer"]
+            Repos["Repository Layer<br/>Data access patterns"]
+            Models["SQLAlchemy Models<br/>4 core entities"]
+            DB[("PostgreSQL<br/>checking_engine schema")]
         end
         
-        subgraph "Domain Services"
-            OS[Operation Service<br/>Red Team operations]
-            ES[Execution Service<br/>Command results]
-            DetS[Detection Service<br/>Blue Team tasks]
-            ResS[Result Service<br/>Detection outcomes]
+        subgraph DOMAIN_SERVICES["Domain Services"]
+            OS["Operation Service<br/>Red Team operations"]
+            ES["Execution Service<br/>Command results"]
+            DetS["Detection Service<br/>Blue Team tasks"]
+            ResS["Result Service<br/>Detection outcomes"]
         end
     end
 
-    subgraph "DETECTION WORKERS"
-        APIWorker[API Detection Workers<br/>SIEM queries • EDR calls<br/>Splunk • CrowdStrike • Elastic]
-        AgentWorker[Agent Detection Workers<br/>OS commands • Log analysis<br/>Windows • Linux • macOS]
+    subgraph WORKERS["DETECTION WORKERS"]
+        APIWorker["API Detection Workers<br/>SIEM queries • EDR calls<br/>Splunk • CrowdStrike • Elastic"]
+        AgentWorker["Agent Detection Workers<br/>OS commands • Log analysis<br/>Windows • Linux • macOS"]
     end
 
-    subgraph "EXTERNAL SYSTEMS"
-        Caldera[MITRE Caldera<br/>Red Team platform]
-        BlueSystems[Blue Team Systems<br/>SIEM • EDR • Logs]
+    subgraph EXTERNAL["EXTERNAL SYSTEMS"]
+        Caldera["MITRE Caldera<br/>Red Team platform"]
+        BlueSystems["Blue Team Systems<br/>SIEM • EDR • Logs"]
     end
 
     %% External to Message Broker
