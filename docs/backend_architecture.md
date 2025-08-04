@@ -37,19 +37,35 @@ expand/checking-engine/
 │       │   │   └── router.py       # Main API router
 │       │   └── deps.py             # API dependencies
 │       ├── application/            # Application layer (use case orchestration)
-│       │   └── message_service.py  # Message processing orchestration
+│       │   ├── message_service.py  # Message processing orchestration
+│       │   └── result_service.py   # Result processing orchestration
 │       ├── domain/                 # Domain layer (business logic)
 │       │   ├── operation_service.py # Operation business logic
 │       │   ├── execution_service.py # Execution business logic
-│       │   └── detection_service.py # Detection business logic
+│       │   ├── detection_service.py # Detection business logic
+│       │   └── result_service.py   # Detection result business logic
 │       ├── database/               # Database infrastructure
 │       │   └── connection.py       # Database connection management
 │       ├── mq/                     # Message queue infrastructure
 │       │   ├── connection.py       # RabbitMQ connection utilities
 │       │   ├── consumers/          # Message consumers
-│       │   │   └── caldera_execution_consumer.py
+│       │   │   ├── caldera_execution_consumer.py
+│       │   │   ├── worker_task_consumer.py
+│       │   │   ├── detection_result_consumer.py
+│       │   │   └── __init__.py
 │       │   └── publishers/         # Message publishers
-│       │       └── task_dispatcher.py
+│       │       ├── task_dispatcher.py
+│       │       ├── result_publisher.py
+│       │       └── __init__.py
+│       ├── workers/                # Detection worker framework
+│       │   ├── base_worker.py      # Base worker class
+│       │   ├── api/                # API detection workers
+│       │   │   ├── api_worker_base.py
+│       │   │   ├── mock_api_worker.py
+│       │   │   └── __init__.py
+│       │   ├── agent/              # Agent detection workers (future)
+│       │   │   └── __init__.py
+│       │   └── __init__.py
 │       ├── models/                 # SQLAlchemy ORM models
 │       │   ├── base.py             # Base model class
 │       │   ├── operation.py        # Operation model
@@ -90,18 +106,26 @@ The backend follows clean architecture patterns with clear separation of concern
 └─────────────────────────────────────────────────────────────┘
                                │
 ┌─────────────────────────────────────────────────────────────┐
-│                    Business Logic Layer                     │
+│                    Application Layer                        │
 │  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐│
-│  │   Domain        │ │   Repositories  │ │    Schemas      ││
-│  │   Services      │ │   Data Access   │ │   Validation    ││
+│  │   Message       │ │   Result        │ │   Task          ││
+│  │   Processing    │ │   Processing    │ │   Dispatching   ││
+│  └─────────────────┘ └─────────────────┘ └─────────────────┘│
+└─────────────────────────────────────────────────────────────┘
+                               │
+┌─────────────────────────────────────────────────────────────┐
+│                    Domain Layer                             │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐│
+│  │   Operation     │ │   Detection     │ │   Result        ││
+│  │   Services      │ │   Services      │ │   Services      ││
 │  └─────────────────┘ └─────────────────┘ └─────────────────┘│
 └─────────────────────────────────────────────────────────────┘
                                │
 ┌─────────────────────────────────────────────────────────────┐
 │                 Infrastructure Layer                        │
 │  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐│
-│  │   Database      │ │   Message Queue │ │   External      ││
-│  │   PostgreSQL    │ │   RabbitMQ      │ │   Integrations  ││
+│  │   Database      │ │   Message Queue │ │   Workers       ││
+│  │   PostgreSQL    │ │   RabbitMQ      │ │   Framework     ││
 │  └─────────────────┘ └─────────────────┘ └─────────────────┘│
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -121,6 +145,7 @@ graph TB
     subgraph "CHECKING ENGINE BACKEND"
         subgraph "Message Consumers"
             IC[Caldera Execution Consumer<br/>Processes Red Team results]
+            WTC[Worker Task Consumer<br/>Processes detection tasks]
             RC[Detection Result Consumer<br/>Processes detection outcomes]
         end
         
@@ -128,7 +153,7 @@ graph TB
             MP[Message Processor<br/>Orchestrates data flow]
             DS[Detection Service<br/>Creates detection tasks]
             TD[Task Dispatcher<br/>Routes tasks by type]
-            AS[Analytics Service<br/>Processes results & metrics]
+            RS[Result Service<br/>Processes detection results]
         end
         
         subgraph "API Server"
@@ -146,6 +171,7 @@ graph TB
             OS[Operation Service<br/>Red Team operations]
             ES[Execution Service<br/>Command results]
             DetS[Detection Service<br/>Blue Team tasks]
+            ResS[Result Service<br/>Detection outcomes]
         end
     end
 
@@ -173,8 +199,10 @@ graph TB
     TD --> GTQ
     
     %% Workers consume tasks
-    ATQ --> APIWorker
-    GTQ --> AgentWorker
+    ATQ --> WTC
+    GTQ --> WTC
+    WTC --> APIWorker
+    WTC --> AgentWorker
     
     %% Workers interact with Blue Team systems
     APIWorker --> BlueSystems
@@ -187,13 +215,13 @@ graph TB
     %% Results flow back
     ARQ --> RC
     GRQ --> RC
-    RC --> AS
+    RC --> RS
     
     %% Data persistence
     OS --> Repos
     ES --> Repos
     DetS --> Repos
-    AS --> Repos
+    RS --> Repos
     Repos --> Models
     Models --> DB
     
@@ -209,16 +237,86 @@ graph TB
     classDef domain fill:#e1f5fe,stroke:#0277bd
     classDef external fill:#fafafa,stroke:#616161
 
-    class IC,RC consumer
-    class MP,DS,TD,AS logic
+    class IC,WTC,RC consumer
+    class MP,DS,TD,RS logic
     class API,Health api
     class Repos,Models,DB data
-    class OS,ES,DetS domain
+    class OS,ES,DetS,ResS domain
     class IQ,ATQ,GTQ,ARQ,GRQ,APIWorker,AgentWorker,Caldera,BlueSystems external
 ```
 
+### 3. Worker Framework Architecture
 
-### 3. Layer Responsibilities
+The detection worker framework provides a scalable and extensible system for processing detection tasks:
+
+```mermaid
+graph TB
+    subgraph "Worker Framework"
+        BW[BaseWorker<br/>Abstract base class]
+        BAW[BaseAPIWorker<br/>API worker base]
+        MAW[MockAPIWorker<br/>Mock implementation]
+        
+        BW --> BAW
+        BAW --> MAW
+    end
+    
+    subgraph "Worker Features"
+        Jitter[Jitter Logic<br/>Random delay 0.1-0.5s]
+        Retry[Retry Logic<br/>Max retries + delay]
+        Result[Result Builder<br/>Standardized messages]
+    end
+    
+    subgraph "Task Processing"
+        Task[Task Message]
+        Process[Process Task]
+        ResultMsg[Result Message]
+        
+        Task --> Process
+        Process --> ResultMsg
+    end
+    
+    BW -.-> Jitter
+    BW -.-> Retry
+    BW -.-> Result
+    
+    Process -.-> Jitter
+    Process -.-> Retry
+    Process -.-> Result
+```
+
+### 4. Message Flow Architecture
+
+```mermaid
+sequenceDiagram
+    participant C as Caldera
+    participant MQ as RabbitMQ
+    participant CE as Caldera Consumer
+    participant TD as Task Dispatcher
+    participant WTC as Worker Task Consumer
+    participant W as Worker
+    participant RP as Result Publisher
+    participant RC as Result Consumer
+    participant DB as Database
+    
+    C->>MQ: Execution Result
+    MQ->>CE: Consume Message
+    CE->>DB: Store Execution
+    CE->>TD: Create Detection Tasks
+    TD->>MQ: Publish Tasks
+    MQ->>WTC: Consume Task
+    WTC->>W: Process Task
+    W->>W: Apply Jitter
+    W->>W: Execute Detection
+    W->>W: Handle Retries
+    W->>W: Build Result
+    W->>RP: Publish Result
+    RP->>MQ: Send to Response Queue
+    MQ->>RC: Consume Result
+    RC->>DB: Store Detection Result
+    RC->>DB: Update Execution Status
+```
+
+### 5. Layer Responsibilities
 
 #### **API Layer (`api/`)**
 - **Purpose**: Handle HTTP requests and responses
@@ -238,6 +336,7 @@ graph TB
 - **Purpose**: Use case orchestration and cross-cutting concerns
 - **Components**:
   - `message_service.py`: Processes incoming Caldera messages and coordinates domain services
+  - `result_service.py`: Orchestrates detection result processing
 
 #### **Domain Layer (`domain/`)**
 - **Purpose**: Business logic and core domain services
@@ -245,6 +344,7 @@ graph TB
   - `operation_service.py`: Operation management and business rules
   - `execution_service.py`: Execution result processing logic
   - `detection_service.py`: Detection task creation and management
+  - `result_service.py`: Detection result business logic
 
 #### **Infrastructure Layer (Distributed)**
 
@@ -258,7 +358,14 @@ graph TB
 - **Components**:
   - `connection.py`: RabbitMQ connection utilities for different user roles
   - `consumers/`: Message consumers for processing incoming messages
-  - `publishers/`: Message publishers for dispatching tasks
+  - `publishers/`: Message publishers for dispatching tasks and publishing results
+
+**Worker Framework (`workers/`)**:
+- **Purpose**: Detection task processing framework
+- **Components**:
+  - `base_worker.py`: Abstract base class with jitter, retry, and result building
+  - `api/`: API detection workers (SIEM, EDR, etc.)
+  - `agent/`: Agent detection workers (OS commands, log analysis)
 
 #### **Data Layer (`models/`, `schemas/`, `repositories/`)**
 
@@ -283,13 +390,13 @@ graph TB
   - `base.py`: Generic CRUD operations
   - `*_repo.py`: Specialized repository classes
 
-### 4. Data Flow Architecture
+### 6. Data Flow Architecture
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   Caldera       │────│   RabbitMQ      │────│  Backend        │
 │   (Red Team)    │    │   Message       │    │  Consumer       │
-│                 │    │   Queue         │    │  (Future)       │
+│                 │    │   Queue         │    │                 │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
                                                        │
                                                        ▼
@@ -299,9 +406,12 @@ graph TB
 │  1. Receive Execution Results                                   │
 │  2. Store in execution_results table                           │
 │  3. Create Detection Executions                                │
-│  4. Process Detections (API/Agent)                             │
-│  5. Store Detection Results                                    │
-│  6. Generate Statistics                                        │
+│  4. Dispatch Tasks to Workers                                  │
+│  5. Workers Process Tasks (with jitter/retry)                 │
+│  6. Workers Publish Results                                    │
+│  7. Store Detection Results                                    │
+│  8. Update Detection Execution Status                          │
+│  9. Generate Statistics                                        │
 └─────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
@@ -314,7 +424,7 @@ graph TB
 
 ## Database Design
 
-### 5. Entity Relationship Diagram
+### 7. Entity Relationship Diagram
 
 ```mermaid
 erDiagram
@@ -373,12 +483,12 @@ erDiagram
         jsonb parsed_results
         timestamp result_timestamp
         string result_source
-        jsonb metadata
+        jsonb result_metadata
         timestamp created_at
     }
 ```
 
-### 6. Table Relationships
+### 8. Table Relationships
 
 **Operations (1:N) Execution Results**:
 - One operation can have multiple execution results
@@ -398,7 +508,7 @@ erDiagram
 
 ## API Design
 
-### 7. RESTful API Structure
+### 9. RESTful API Structure
 
 **Base URL**: `http://localhost:1337/api/v1`
 
@@ -459,7 +569,7 @@ PUT    /detections/results/{id}               # Update detection result
 DELETE /detections/results/{id}               # Delete detection result
 ```
 
-### 8. Request/Response Patterns
+### 10. Request/Response Patterns
 
 #### **Standard Response Format**
 ```json
@@ -490,9 +600,42 @@ DELETE /detections/results/{id}               # Delete detection result
 }
 ```
 
+## Worker Framework
+
+### 11. Worker Architecture
+
+The detection worker framework provides a scalable and extensible system for processing detection tasks:
+
+#### **BaseWorker Class**
+- **Purpose**: Abstract base class for all detection workers
+- **Features**:
+  - Jitter logic (random delay 0.1-0.5s before processing)
+  - Retry logic (configurable max retries and delay)
+  - Standardized result message building
+  - Error handling with custom exceptions
+
+#### **Worker Types**
+- **API Workers** (`workers/api/`): SIEM queries, EDR calls, external API integrations
+- **Agent Workers** (`workers/agent/`): OS commands, log analysis, local system checks
+
+#### **Worker Features**
+- **Jitter**: Random delay before processing to avoid thundering herd
+- **Retry**: Automatic retry with exponential backoff for transient failures
+- **Result Standardization**: Consistent result message format
+- **Error Handling**: Custom exceptions for different failure types
+
+### 12. Message Processing Flow
+
+1. **Task Reception**: Worker receives task from RabbitMQ
+2. **Jitter Application**: Random delay (0.1-0.5s) before processing
+3. **Task Processing**: Execute detection logic
+4. **Result Building**: Create standardized result message
+5. **Result Publishing**: Send result to appropriate response queue
+6. **Error Handling**: Handle failures with retry logic
+
 ## Configuration Management
 
-### 9. Environment Variables
+### 13. Environment Variables
 
 The application uses Pydantic Settings for configuration management:
 
@@ -506,11 +649,16 @@ class Settings(BaseSettings):
     # Database
     database_url: str
     
-    # RabbitMQ (Future)
+    # RabbitMQ
     rabbitmq_host: str = "localhost"
     rabbitmq_port: int = 5672
     rabbitmq_username: str
     rabbitmq_password: str
+    
+    # Worker Configuration
+    worker_jitter_range: tuple[float, float] = (0.1, 0.5)
+    worker_max_retries: int = 1
+    worker_retry_delay: int = 3
     
     model_config = {
         "env_file": ".env",
@@ -518,7 +666,7 @@ class Settings(BaseSettings):
     }
 ```
 
-### 10. Environment File (.env)
+### 14. Environment File (.env)
 ```env
 # Database Configuration
 DATABASE_URL=postgresql+asyncpg://db_caldera:password@localhost:5432/caldera_purple
@@ -570,13 +718,19 @@ ROUTING_KEY_AGENT_TASK=checking.agent.task
 ROUTING_KEY_API_RESPONSE=checking.api.response
 ROUTING_KEY_AGENT_RESPONSE=checking.agent.response
 
+# Worker Configuration
+WORKER_JITTER_RANGE_MIN=0.1
+WORKER_JITTER_RANGE_MAX=0.5
+WORKER_MAX_RETRIES=1
+WORKER_RETRY_DELAY=3
+
 # Logging
 LOG_LEVEL=INFO
 ```
 
 ## Technology Stack
 
-### 11. Core Technologies
+### 15. Core Technologies
 
 **Backend Framework**:
 - **FastAPI**: Modern, fast web framework for building APIs
@@ -591,6 +745,11 @@ LOG_LEVEL=INFO
 **Message Queue**:
 - **RabbitMQ**: Message broker for async communication
 - **aio-pika**: Async Python client for RabbitMQ
+
+**Worker Framework**:
+- **asyncio**: Async task processing
+- **Custom Exceptions**: Error handling and retry logic
+- **Structured Logging**: Comprehensive logging with correlation IDs
 
 **Development Tools**:
 - **httpx**: HTTP client for testing
