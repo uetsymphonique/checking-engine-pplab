@@ -33,7 +33,7 @@ class MockAPIWorker(BaseAPIWorker):
         )
 
         # Simulate failure 40% of the time to test retry logic
-        if random.random() < 0.4:
+        if random.random() < 0.6:
             logger.warning("[MOCK-API] Simulating failure for task %s", task_id)
             raise TaskProcessingException("Simulated API failure for testing retry logic")
 
@@ -64,6 +64,7 @@ class MockAPIWorker(BaseAPIWorker):
                 "worker_note": "Mock worker returns default result.",
             },
             status="completed",
+            retry_count=1,  # Single attempt for successful completion
         )
 
         logger.info("[MOCK-API] Completed task %s successfully (detected=%s)", task_id, detected)

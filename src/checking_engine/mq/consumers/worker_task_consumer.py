@@ -90,7 +90,7 @@ class DetectionTaskConsumer:
                 worker = self._get_worker_for_task(detection_type, detection_platform)
                 if not worker:
                     logger.warning(
-                        "No worker found for detection_type=%s, platform=%s - publishing failed result",
+                        "No worker found for detection_type=%s, platform=%s - publishing cancelled result",
                         detection_type, detection_platform
                     )
 
@@ -105,13 +105,14 @@ class DetectionTaskConsumer:
                         "result_source": "dispatcher",
                         "result_metadata": {"error": "unsupported worker"},
                         "started_at": None,
-                        "status": "failed",
+                        "status": "cancelled",
+                        "retry_count": 0,
                     }
                     await self.result_publisher.publish_detection_result(
                         fail_result,
                         worker_type=task_data.get("metadata", {}).get("worker_type", detection_type),
                     )
-                    logger.debug("Published failed-unsupported result for task %s", delivery_tag)
+                    logger.debug("Published cancelled-unsupported result for task %s", delivery_tag)
                     return  # ACK message
                 # Ensure worker initialized once
                 if hasattr(worker, "_initialized") and not getattr(worker, "_initialized"):

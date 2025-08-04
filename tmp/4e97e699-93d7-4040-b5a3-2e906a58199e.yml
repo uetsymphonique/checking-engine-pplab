@@ -30,10 +30,10 @@
       - source: host.dir.staged
   detections:
   - detection_type: api
-  detection_platform: apitest
-  detection_config:
-    command: 'detection query for T1074.001 go here'
-    jitter: 9
-    before_reported_time: 900
-    after_reported_time: 900
-    delay: 3
+    detection_platform: apitest
+    detection_config:
+      command: 'detection query for T1074.001 go here'
+      jitter: 9
+      before_reported_time: 900
+      after_reported_time: 900
+      delay: 3

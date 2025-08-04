@@ -165,6 +165,7 @@ class TaskDispatcher:
                     "detection_config": detection.detection_config,
                     "created_at": detection.created_at.isoformat() if detection.created_at else None,
                     "execution_context": detection.execution_metadata,
+                    "max_retries": detection.max_retries,
                     "metadata": {
                         "priority": "normal",
                         "worker_type": worker_type,

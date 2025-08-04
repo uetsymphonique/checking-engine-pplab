@@ -98,36 +98,38 @@ class BaseWorker(ABC):
         if total_jitter > 0:
             await asyncio.sleep(total_jitter)
         
-        # Get retry configuration
-        max_retries = task.get("max_retries", 1)
+        # Get retry configuration (max_retries = max_attempts)
+        max_attempts = task.get("max_retries", 1)
         delay = detection_config.get("delay", 3.0)
         
-        logger.debug("Task %s - Max retries: %d, Delay between retries: %.2fs",
-                    task_id, max_retries, delay)
+        logger.debug("Task %s - Max attempts: %d, Delay between retries: %.2fs",
+                    task_id, max_attempts, delay)
         
-        # Retry loop
+        # Attempt loop
         last_error = None
-        for attempt in range(max_retries + 1):  # +1 because first attempt is not a retry
+        start_time = datetime.utcnow()
+        
+        for attempt in range(max_attempts):
             try:
-                logger.debug("Task %s - Attempt %d/%d", task_id, attempt + 1, max_retries + 1)
-                start_time = datetime.utcnow()
+                logger.debug("Task %s - Attempt %d/%d", task_id, attempt + 1, max_attempts)
                 result = await self._do_work(task)
                 # Ensure required metadata present
                 if "started_at" not in result or result["started_at"] is None:
                     result["started_at"] = start_time.isoformat()
                 result["status"] = "completed"
+                result["retry_count"] = attempt + 1  # Số attempts thực tế đã thực hiện
                 logger.debug("Task %s - Completed successfully on attempt %d", task_id, attempt + 1)
                 return result
                 
             except Exception as e:
                 last_error = e
-                if attempt < max_retries:
+                if attempt < max_attempts - 1:  # Còn attempts để retry
                     logger.warning("Task %s - Attempt %d failed, retrying in %.2fs: %s",
                                  task_id, attempt + 1, delay, str(e))
                     await asyncio.sleep(delay)
                 else:
-                    logger.error("Task %s - Max retries exceeded (%d attempts). Last error: %s",
-                               task_id, max_retries + 1, str(e))
+                    logger.error("Task %s - Max attempts exceeded (%d attempts). Last error: %s",
+                               task_id, max_attempts, str(e))
 
                     fail_msg = self._build_result_message(
                         task,
@@ -137,12 +139,13 @@ class BaseWorker(ABC):
                         result_source="worker",
                         result_metadata={"error": str(e)},
                         status="failed",
-                        started_at=start_time.isoformat() if 'start_time' in locals() else None,
+                        started_at=start_time.isoformat(),
+                        retry_count=max_attempts,  # Số attempts thực tế đã thực hiện
                     )
-                    raise MaxRetriesExceededException(task_id, max_retries + 1, e, fail_msg) from e
+                    raise MaxRetriesExceededException(task_id, max_attempts, e, fail_msg) from e
         
         # Should never reach here
-        raise Exception(f"Unexpected end of retry loop: {last_error}")
+        raise Exception(f"Unexpected end of attempt loop: {last_error}")
 
     # ------------------------------------------------------------------
     # Helper: build standardized detection result message
@@ -159,6 +162,7 @@ class BaseWorker(ABC):
         result_timestamp: Optional[str] = None,
         started_at: Optional[str] = None,
         status: Optional[str] = None,
+        retry_count: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Return dict ready to be published to \*.responses queue.
 
@@ -176,6 +180,7 @@ class BaseWorker(ABC):
             "result_metadata": result_metadata or {},
             "started_at": started_at,
             "status": status,
+            "retry_count": retry_count,
         }
 
     # ------------------------------------------------------------------

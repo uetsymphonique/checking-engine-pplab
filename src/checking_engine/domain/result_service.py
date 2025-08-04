@@ -48,13 +48,13 @@ class DetectionResultService:  # pylint: disable=too-few-public-methods
             logger.warning("DetectionExecution %s not found while storing result", exec_id)
             return
 
-        # determine new retry_count (count results so far)
-        retry_count = execution.retry_count + 1
-        status = DetectionStatus.COMPLETED if data.get("status") == "completed" else DetectionStatus.FAILED
+        # Use retry_count from worker result (number of attempts actually made)
+        retry_count = data.get("retry_count", 1)  # Default to 1 if not provided
+        status = data.get("status") 
 
         fields: Dict[str, Any] = {
             "retry_count": retry_count,
-            "status": status.value if isinstance(status, DetectionStatus) else status,
+            "status": status,
             "completed_at": datetime.fromisoformat(data["result_timestamp"]),
         }
         if execution.started_at is None and data.get("started_at"):
