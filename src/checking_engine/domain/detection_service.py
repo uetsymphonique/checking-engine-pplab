@@ -23,7 +23,8 @@ class DetectionService:
         self, 
         execution_result_id: UUID, 
         operation_id: UUID, 
-        detections_data: Any
+        detections_data: Any,
+        execution_metadata: Optional[Dict[str, Any]] = None
     ) -> List[DetectionExecution]:
         """Create detection executions from Caldera message detections field"""
         try:
@@ -76,13 +77,14 @@ class DetectionService:
                         status=DetectionStatus.PENDING,
                         retry_count=0,
                         max_retries=max_retries,
-                        execution_metadata={}
+                        execution_metadata=execution_metadata
                     )
                     
                     detection_execution = await self.execution_repo.create(self.db, create_data)
+                    
                     created_detections.append(detection_execution)
                     
-                    logger.debug(f"Created detection execution: type={detection_type}, platform={detection_config.get('detection_platform')}")
+                    logger.debug(f"Created detection execution: type={detection_type}, platform={detection_config.get('detection_platform')}, context={execution_metadata}")
                     
                 except Exception as e:
                     logger.error(f"Error creating detection execution from config {detection_config}: {e}")

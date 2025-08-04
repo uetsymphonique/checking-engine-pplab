@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from checking_engine.config import settings
 from checking_engine.database.connection import db
 from checking_engine.api.v1.router import router as v1_router
-from checking_engine.mq.consumers import CalderaExecutionConsumer
+from checking_engine.mq.consumers import CalderaExecutionConsumer, DetectionResultConsumer
 from checking_engine.utils.logging import get_logger, setup_logging
 
 # Initialize logging with config settings
@@ -28,32 +28,37 @@ async def lifespan(app: FastAPI):
     await db.initialize()
     logger.info("Database initialized")
     
-    # Initialize RabbitMQ consumer
-    consumer = CalderaExecutionConsumer()
+    # Initialize RabbitMQ consumers
+    caldera_consumer = CalderaExecutionConsumer()
+    result_consumer = DetectionResultConsumer()
     try:
-        await consumer.start_consuming()
-        logger.info("RabbitMQ consumer started successfully")
+        await caldera_consumer.start_consuming()
+        await result_consumer.start_consuming()
+        logger.info("RabbitMQ consumers started successfully")
         
-        # Store consumer in app state for shutdown
-        app.state.consumer = consumer
-        
+        # Store for shutdown
+        app.state.caldera_consumer = caldera_consumer
+        app.state.result_consumer = result_consumer
+
     except Exception as e:
-        logger.error(f"Failed to start RabbitMQ consumer: {e}")
-        # Don't fail app startup if RabbitMQ is down
-        app.state.consumer = None
+        logger.error(f"Failed to start one of RabbitMQ consumers: {e}")
+        app.state.caldera_consumer = None
+        app.state.result_consumer = None
     
     yield
     
     # Shutdown
     logger.info("Shutting down Checking Engine application")
     
-    # Stop consumer
-    if hasattr(app.state, 'consumer') and app.state.consumer:
-        try:
-            await app.state.consumer.stop_consuming()
-            logger.info("RabbitMQ consumer stopped")
-        except Exception as e:
-            logger.error(f"Error stopping consumer: {e}")
+    # Stop consumers
+    for name in ("caldera_consumer", "result_consumer"):
+        consumer = getattr(app.state, name, None)
+        if consumer:
+            try:
+                await consumer.stop_consuming()
+                logger.info("%s stopped", name)
+            except Exception as e:
+                logger.error("Error stopping %s: %s", name, e)
     
     # Close database
     await db.close()

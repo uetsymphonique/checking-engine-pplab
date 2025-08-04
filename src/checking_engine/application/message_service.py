@@ -44,12 +44,19 @@ class MessageProcessingService:
             
             # 3. Create detection executions if detections exist
             detections_data = execution_data.get("detections")
+            execution_metadata = {
+                "agent_host": execution_data.get("agent_host"),
+                "agent_paw": execution_data.get("agent_paw"),
+                "agent_reported_time": execution_data.get("agent_reported_time")
+            }
+            logger.debug(f"Execution metadata: {execution_metadata}")
             detection_executions = []
             if detections_data:
                 detection_executions = await self.detection_service.create_detection_executions_from_message(
                     execution_result.id,
                     operation.operation_id,
-                    detections_data
+                    detections_data,
+                    execution_metadata
                 )
             
             # Commit transaction

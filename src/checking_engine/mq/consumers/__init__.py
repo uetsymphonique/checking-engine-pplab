@@ -12,7 +12,10 @@ All consumers implement proper error handling and message acknowledgment.
 """
 
 from .caldera_execution_consumer import CalderaExecutionConsumer
+from .worker_task_consumer import DetectionTaskConsumer
+from .detection_result_consumer import DetectionResultConsumer
 
 __all__ = [
-    'CalderaExecutionConsumer'
+    'CalderaExecutionConsumer',
+    'DetectionTaskConsumer', 'DetectionResultConsumer'
 ]

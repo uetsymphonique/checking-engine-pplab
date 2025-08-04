@@ -10,7 +10,7 @@ import asyncio
 import aio_pika
 import json
 from typing import List, Dict, Any, Optional
-from uuid import UUID
+from uuid import uuid4, UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from checking_engine.config import settings
@@ -154,16 +154,17 @@ class TaskDispatcher:
                 worker_type = queue_info['worker_type']
                 if worker_type not in tasks_by_type:
                     tasks_by_type[worker_type] = 0
-                
+
                 # Create task message payload
                 task_message = {
-                    "task_id": str(detection.id),
+                    "task_id": str(uuid4()),  # unique id for downstream result mapping
                     "detection_execution_id": str(detection.id),
                     "operation_id": str(detection.operation_id) if detection.operation_id else None,
                     "detection_type": detection.detection_type,
                     "detection_platform": detection.detection_platform,
                     "detection_config": detection.detection_config,
                     "created_at": detection.created_at.isoformat() if detection.created_at else None,
+                    "execution_context": detection.execution_metadata,
                     "metadata": {
                         "priority": "normal",
                         "worker_type": worker_type,

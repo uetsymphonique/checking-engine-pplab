@@ -12,7 +12,8 @@ All publishers implement proper connection management and error handling.
 """
 
 from .task_dispatcher import TaskDispatcher
+from .result_publisher import ResultPublisher
 
 __all__ = [
-    'TaskDispatcher'
+    'TaskDispatcher', 'ResultPublisher'
 ]

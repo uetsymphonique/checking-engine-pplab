@@ -13,7 +13,7 @@ Supports multiple RabbitMQ user roles with different permissions.
 """
 
 from .connection import get_rabbitmq_connection, test_connect_all_roles
-from .consumers import CalderaExecutionConsumer
+from .consumers import CalderaExecutionConsumer, DetectionTaskConsumer
 from .publishers import TaskDispatcher
 
 __all__ = [
@@ -23,6 +23,7 @@ __all__ = [
     
     # Consumers
     'CalderaExecutionConsumer',
+    'DetectionTaskConsumer',
     
     # Publishers
     'TaskDispatcher'
