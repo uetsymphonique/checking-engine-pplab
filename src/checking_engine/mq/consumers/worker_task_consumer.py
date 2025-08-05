@@ -8,10 +8,9 @@ After receiving a message, the consumer routes to the appropriate worker based o
 `metadata.worker_type` (currently only supports 'api' with MockAPIWorker).
 """
 
-import asyncio
 import json
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional
 
 import aio_pika
 
@@ -19,6 +18,7 @@ from checking_engine.config import settings
 from checking_engine.mq.connection import get_rabbitmq_connection
 from checking_engine.utils.logging import get_logger
 from checking_engine.workers.api.mock_api_worker import MockAPIWorker
+from checking_engine.workers.api.cym_api_worker import CymAPIWorker
 from checking_engine.workers.base_worker import MaxRetriesExceededException
 from checking_engine.mq.publishers import ResultPublisher
 
@@ -39,7 +39,7 @@ class DetectionTaskConsumer:
 
         # Worker registry (map by detection_type)
         self.worker_registry = {
-            "api": MockAPIWorker(),
+            "api": [MockAPIWorker(), CymAPIWorker()],
             # "windows": WindowsAgentWorker(), # to be implemented
             # "linux": LinuxAgentWorker(),
             # "darwin": MacAgentWorker(),
@@ -174,15 +174,9 @@ class DetectionTaskConsumer:
     
     def _get_worker_for_task(self, detection_type: str, detection_platform: str):
         """Get appropriate worker based on detection_type and detection_platform."""
-        for worker in self.worker_registry.values():
-            if hasattr(worker, 'supports_detection'):
+        for workers in self.worker_registry.values():
+            for worker in workers:
                 if worker.supports_detection(detection_type, detection_platform):
                     return worker
-        
-        # Fallback to worker_type matching for backward compatibility
-        # for worker in self.workers:
-        #     if hasattr(worker, 'worker_type'):
-        #         if worker.worker_type == detection_type:
-        #             return worker
         
         return None

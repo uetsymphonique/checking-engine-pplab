@@ -47,7 +47,8 @@ class MessageProcessingService:
             execution_metadata = {
                 "agent_host": execution_data.get("agent_host"),
                 "agent_paw": execution_data.get("agent_paw"),
-                "agent_reported_time": execution_data.get("agent_reported_time")
+                "agent_reported_time": execution_data.get("agent_reported_time"),
+                "started_at_least": execution_data.get("started_at_least")
             }
             logger.debug(f"Execution metadata: {execution_metadata}")
             detection_executions = []

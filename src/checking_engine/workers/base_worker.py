@@ -48,6 +48,7 @@ class BaseWorker(ABC):
 
     def __init__(self) -> None:  # noqa: D401
         self._semaphore: Optional[asyncio.Semaphore] = None
+        self.result_source: str = "worker"
 
     async def initialize(self) -> None:
         """Optional one-time initialization hook (HTTP session, etc.)."""
@@ -136,7 +137,6 @@ class BaseWorker(ABC):
                         detected=None,
                         raw_response=None,
                         parsed_results=None,
-                        result_source="worker",
                         result_metadata={"error": str(e)},
                         status="failed",
                         started_at=start_time.isoformat(),
@@ -157,7 +157,6 @@ class BaseWorker(ABC):
         detected: Optional[bool] = None,
         raw_response: Optional[Dict[str, Any]] = None,
         parsed_results: Optional[Dict[str, Any]] = None,
-        result_source: Optional[str] = None,
         result_metadata: Optional[Dict[str, Any]] = None,
         result_timestamp: Optional[str] = None,
         started_at: Optional[str] = None,
@@ -176,7 +175,7 @@ class BaseWorker(ABC):
             "raw_response": raw_response,
             "parsed_results": parsed_results,
             "result_timestamp": result_timestamp or datetime.utcnow().isoformat(),
-            "result_source": result_source,
+            "result_source": self.result_source,
             "result_metadata": result_metadata or {},
             "started_at": started_at,
             "status": status,

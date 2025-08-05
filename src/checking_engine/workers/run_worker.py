@@ -13,7 +13,15 @@ async def _run():
     consumer = DetectionTaskConsumer()
     shutdown_event = asyncio.Event()
     
+    shutting_down = False
+    
     def signal_handler(signum, frame):
+        nonlocal shutting_down
+        if shutting_down:
+            # Second Ctrl+C → force quit immediately
+            logger.warning("Second interrupt received, forcing exit now!")
+            sys.exit(1)
+        shutting_down = True
         logger.info("Received signal %s, shutting down worker gracefully...", signum)
         shutdown_event.set()
     
@@ -33,7 +41,10 @@ async def _run():
         raise
     finally:
         logger.info("Stopping worker...")
-        await consumer.stop_consuming()
+        try:
+            await asyncio.wait_for(consumer.stop_consuming(), timeout=10.0)
+        except asyncio.TimeoutError:
+            logger.warning("Graceful shutdown timed out; forcing exit.")
         logger.info("Worker stopped.")
 
 
